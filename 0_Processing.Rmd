@@ -1,0 +1,831 @@
+---
+title: "AdaptationElements_Processing"
+author:
+  - name: "Lolita Muller"
+    email: "m.lolita@cgiar.org"
+    orcid: "0009-0002-8345-7219"
+
+date: "2025-08-17"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,message = FALSE,warning = FALSE)
+```
+
+
+# Load packages
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+library(stringr)
+library(tidyr)
+library(dplyr)
+library(readr)
+```
+
+# Preparation
+To run this code, download the file "AdaptationElements" available at: https://doi.org/10.7910/DVN/VK3CP9.
+Adjust the file path below with the correct location where you would saved the "AdaptationElements" file
+```{r}
+adaptdata <- read_csv("C:/Users/mlolita/Downloads/detailed.csv")
+overview<- read_csv("C:/Users/mlolita/Downloads/Overview.csv")
+```
+
+# Step 1: Hazard type 
+
+This section classifies climate-related hazards mentioned in the `ElementText` column of the `adaptdata` dataset using regex-based keyword matching, aligned with the protocol’s definitions.
+
+
+1. **Column Creation**  
+   A new column `HazardType` is added to store the hazard category for each entry. This column is positioned after `ElementText`.
+
+2. **Keyword Mapping**  
+   Hazard categories are mapped to regex patterns that represent keywords found in the protocol definitions. These keywords are matched case-insensitively within the `ElementText`.
+
+3. **Tagging**  
+   The script loops over all hazard patterns and tags any matching rows accordingly.
+
+---
+
+### Hazard Categories and Associated Keywords
+
+```{r,echo=FALSE}
+library(knitr)
+library(kableExtra)
+
+hazard_keywords <- tribble(
+  ~"Hazard Category", ~"Keywords Used",
+  
+  "Extreme temperature", "heat wave, heatwave, excessive heat, high temperature, extreme temperature, extreme heat, extremely low, cold waves, cold wave, snow, ice, frost, freeze, severe winter, maximum and minimum, warmer, higher occurrence of hot, glacier, snowfall, evapo, extreme weather, heat stress, hot days, hot nights",
+  
+  "Storm", "storm, tropical storm, cyclone, cyclones, Cyclonic activity, typhoon, typhoons, hail, lightning, thunderstorm, heavy rain, windstorm, sand storm, dust storm, tornado, violent rains, torrential, strong winds",
+  
+  "Drought", "drought, drought cycle, prolonged droughts, drougths, dry spell, dry days, ardity",
+  
+  "Wildfire", "wildfire, wild fire, forest fire, land fire, bush fire, pasture fire, fire",
+  
+  "Landslide", "landslide, land slide",
+  
+  "Flood", "flood, coastal flood, riverine flood, flash flood, ice jam flood, inundation",
+  
+  "Change in temperature", "change in temperature, alteration in average temperature, temperature change, temperature rise, temperature drop, consistent change in temperature, rise in temperature, increase in temperature, increases in temperature, temperature increase, increasing temperature, increased temperature, increase temperatures, higher temperatures, average temperature, annual temperature, annual mean temperature, annual air temperature, minimum temperatures, maximum temperatures, number of warm days, rising temperatures, warming temperatures",
+  
+  "Change in precipitation", "change in precipitation, alteration in precipitation, precipitation patterns, shift in timing, shift in amount, shift in intensity, shift in frequency, rainfall, precipitation, distribution of rains, disruption of rains, fluctuation of rains, shorter rain, earlier and ending later",
+  
+  "Salinization", "salinization, salt content, saltwater, salt water, salinity, increase in salt content",
+  
+  "Land degradation", "land degradation, decline in land quality, decline in land health, pasture degradation, desertification, loss of organic matter, degradation of land, erosion, soil erosion",
+  
+  "Sea level rise", "sea level rise, sea level, increase in sea level, coastal flooding, coastal erosion, beach loss, coastline retreat, submersion, water mass",
+  
+  "Sea temperature", "sea temperature, sea surface temperature, change in sea temperature, ocean temperature, water temperature, surface temperature, seawater surface",
+  
+  "Ocean acidification", "ocean acidification, reduction in pH, acidity, acidification, acidic, coral",
+  
+  "Pest and disease", "pest, disease, epidemic, infestation, invasion, insect infestation, vector-borne, biological event, invasive species"
+)
+
+kable(hazard_keywords, "html", escape = FALSE) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>%
+  column_spec(2, width = "50em")
+
+```
+
+```{r,echo=FALSE}
+# 1) Initialize HazardType and relocate
+adaptdata$HazardType <- ""
+adaptdata <- adaptdata %>% relocate(HazardType, .after = ElementText)
+
+# 2) Define your hazard → regex map
+haz_patterns <- list(
+  "Extreme temperature" = paste(
+    "heat wave", "heatwave", "excessive heat", "high temperature", "extreme temperature",
+    "extreme heat", "extremely low", "cold waves", "cold wave", "snow", "ice", "frost",
+    "freeze", "severe winter", "maximum and minimum", "warmer", "higher occurrence of hot",
+    "glacier", "snowfall", "evapo","extreme weather","heat stress","hot days","hot nights", sep = "|"
+  ),
+  
+  "Storm" = paste(
+    "storm", "tropical storm", "cyclone", "cyclones","Cyclonic activity","typhoon", "typhoons", "hail",
+    "lightning", "thunderstorm", "heavy rain", "windstorm", "sand storm", "dust storm",
+    "tornado", "violent rains","torrential","strong winds", sep = "|"
+  ),
+  
+  "Drought" = paste(
+    "drought", "drought cycle", "prolonged droughts","drougths","dry spell","dry days","ardity", sep = "|"
+  ),
+  
+  "Wildfire" = paste(
+    "wildfire", "wild fire", "forest fire", "land fire", "bush fire", "pasture fire","fire",
+    sep = "|"
+  ),
+  
+  "Landslide" = paste(
+    "landslide", "land slide", sep = "|"
+  ),
+  
+  "Flood" = paste(
+    "\\bflood(s|ing)?\\b", "coastal flood", "riverine flood", "flash flood", "ice jam flood",
+    "inundation", sep = "|"
+  ),
+  
+  "Change in temperature" = paste(
+    "change in temperature", "alteration in average temperature", "temperature change",
+    "temperature rise", "temperature drop", "consistent change in temperature",
+    "rise in temperature", "increase in temperature", "increases in temperature",
+    "temperature increase", "increasing temperature", "increased temperature",
+    "increase temperatures", "higher temperatures", "average temperature",
+    "annual temperature","annual mean temperature","annual air temperature","minimum temperatures","maximum temperatures","number of warm days","rising temperatures","warming temperatures", sep = "|"
+  ),
+  
+  "Change in precipitation" = paste(
+    "change in precipitation", "alteration in precipitation", "precipitation patterns",
+    "shift in timing", "shift in amount", "shift in intensity", "shift in frequency",
+    "rainfall", "precipitation", "distribution of rains", "disruption of rains",
+    "fluctuation of rains", "shorter rain", "earlier and ending later", sep = "|"
+  ),
+  
+  "Salinization" = paste(
+    "salinization", "salt content", "saltwater", "salt water", "salinity",
+    "increase in salt content", sep = "|"
+  ),
+  
+  "Land degradation" = paste(
+    "land degradation", "decline in land quality", "decline in land health",
+    "pasture degradation", "desertification", "loss of organic matter",
+    "degradation of land", "erosion", "soil erosion", sep = "|"
+  ),
+  
+  "Sea level rise" = paste(
+    "sea[ -]?level rise", "sea level", "increase in sea level", "coastal flooding",
+    "coastal erosion", "beach loss", "coastline retreat", "submersion","water mass","sea level rise", sep = "|"
+  ),
+  
+  "Sea temperature" = paste(
+    "sea temperature", "sea surface temperature", "change in sea temperature",
+    "ocean temperature", "water temperature","surface temperature","seawater surface", sep = "|"
+  ),
+  
+  "Ocean acidification" = paste(
+    "ocean acidification", "reduction in pH", "acidity", "acidification", "acidic",
+    "coral", sep = "|"
+  ),
+  
+  "Pest and disease" = paste(
+    "pest", "disease", "epidemic", "infestation", "invasion", "insect infestation",
+    "vector-borne", "biological event,invasive species", sep = "|"
+  )
+)
+
+
+# 3) Safe text (no NAs)
+safe_text <- ifelse(is.na(adaptdata$ElementText), "", adaptdata$ElementText)
+
+# 4) Minimal loop to append multiple types
+for(type in names(haz_patterns)) {
+  # find rows that are Hazard and match the pattern
+  hits <- grepl(haz_patterns[[type]], safe_text, ignore.case = TRUE)
+  idx  <- which(!is.na(adaptdata$Element) & adaptdata$Element == "Hazard" & hits)
+  
+  if (length(idx) > 0) {
+    current <- adaptdata$HazardType[idx]
+    adaptdata$HazardType[idx] <- ifelse(
+      current == "",
+      type,
+      paste(current, type, sep = ";")
+    )
+  }
+}
+
+# Now any Hazard row matching multiple patterns will contain e.g. "Flood;Storm;Drought"
+
+```
+
+## Coverage of hazard type 
+
+```{r}
+# Count number of 'Hazard' elements that received a HazardType
+assigned_hazards <- adaptdata %>%
+  filter(Element == "Hazard" & HazardType != "") %>%
+  nrow()
+
+# Total number of Hazard elements
+total_hazards <- adaptdata %>%
+  filter(Element == "Hazard") %>%
+  nrow()
+
+# Display the result
+cat("Hazard rows assigned a category:", assigned_hazards, "out of", total_hazards, "\n")
+cat("**Coverage Rate:**", round(assigned_hazards / total_hazards * 100, 1), "%\n")
+```
+
+## Hazard type summary data 
+
+```{r,echo=FALSE}
+library(dplyr)
+library(tidyr)
+library(DT)
+
+# 1. Filter for hazard elements with at least one category
+hazard_counts <- adaptdata %>%
+  filter(Element == "Hazard" & HazardType != "") %>%
+  separate_rows(HazardType, sep = ";") %>%
+  count(HazardType, sort = TRUE) %>%
+  rename(`Hazard Category` = HazardType, `Occurrences` = n)
+
+# 2. Display with DT for interactivity
+DT::datatable(
+  hazard_counts,
+  rownames = FALSE,
+  options = list(
+    pageLength = 10,
+    autoWidth = TRUE,
+    dom = 'tip'
+  )
+)
+
+```
+
+## Hazard type raw data 
+
+```{r}
+# Load DT
+library(DT)
+
+# Filter Hazard elements and show them
+hazard_table <- adaptdata %>%
+  filter(Element == "Hazard") %>%
+  select(Country, Document, ElementText, HazardType) %>%
+  mutate(
+    ElementText = ifelse(
+      nchar(ElementText) > 50,
+      paste0("<span title='", ElementText, "'>", substr(ElementText, 1, 50), "...</span>"),
+      ElementText
+    )
+  )
+
+# Display the table
+datatable(
+  hazard_table,
+  escape = FALSE,  # Allow HTML rendering
+  options = list(pageLength = 10, autoWidth = TRUE),
+  caption = "📄 Hazard elements and their assigned HazardType"
+)
+
+```
+
+
+# Step 2: Systems at risk
+
+We assign a SystemType to each row of adaptdata where the element is "System at risk". This classification is based on the official reporting protocol definitions, which describe different climate-sensitive systems affected by hazards (e.g., agriculture, biodiversity, infrastructure).
+
+To do this, we use a dictionary of keyword patterns that match text found in the ElementText column. These keywords are derived from the protocol and expanded where needed to capture variations in language.
+
+Only rows where the element is "System at risk" are considered.
+
+The following table summarizes the system categories used for classification and the corresponding keyword patterns:
+
+```{r,echo=FALSE}
+library(knitr)
+library(kableExtra)
+library(tibble)
+
+system_table <- tribble(
+  ~`System Type`, ~`Keywords Used`,
+
+  "Crop", "crop, cropping systems, crop production, yield, cultivated area, agriculture, agricultural, agricultural production, agricultural pests, pest, irrigated, rain-fed, farming, land use planning, crop loss, agroecological zone, production",
+
+  "Livestock", "livestock, pasture, pastoralist, pastoral area, grazing, animal health, productivity losses, herder, livestock loss",
+
+  "Fisheries and aquaculture", "fish, fisheries, aquaculture, fishing, marine harvest",
+
+  "Forest", "forest, forestry, forest product, tree, non-timber",
+
+  "Terrestrial", "terrestrial ecosystem, terrestrial, drylands, land resource, natural resource, ecosystem structure, ecosystem services, ecological system, desertification, land degradation, soil degradation, soil erosion, environment",
+
+  "Freshwater", "freshwater, wetlands, inland wetlands, water resource, drinking water, potable water, water quality, water availability, water supply, river, water scarcity, water shortage, hydrological cycle, water stress, water table, water source, groundwater, water supplied, dams",
+
+  "Biodiversity", "biodiversity, flora, fauna, species, species extinction, extinction, range of species, ecosystem change",
+
+  "Coastal", "coast, coastal, marine, mangrove, ocean, coral, beach, coastal erosion, sea level rise, blue carbon, coastal ecosystem, coastal zone, eutrophication, algual bloom",
+
+  "Food and nutrition", "food security, food insecure, food insecurity, nutrition, malnutrition, hunger, food safety, food availability, famine, undernutrition, overnutrition, obesity",
+
+  "Gender and inclusion", "gender, women, youth, children, elderly, inclusion, social exclusion, vulnerable group, vulnerable population, minority group, indigenous, small-scale producer, pastoralist, fishing communities, forest-based communities, high-risk regions",
+
+  "Livelihoods and poverty", "livelihood, poverty, income, employment, labor, economic activity, loss of income, loss of livelihood, safety net, insurance, socio-economic development, tourism, subsistence, workforce, economic, tourists, outdoor activities, ski, vacation",
+
+  "Health", "health, mental health, morbidity, mortality, vector-borne disease, water-borne disease, infectious disease, respiratory disease, malaria, epidemic, climate-sensitive disease, heat morbidity, disease, deaths, human lives, pollution, life expectancy",
+
+  "Infrastructure and services", "infrastructure, critical infrastructure, services, critical services, road, bridge, electricity, power supply, energy, water supply, sanitation, hygiene, education, school, building, housing, settlement, evacuation, telecom, transport, waste management, power, hydropower, railways, port, industry, material, industries",
+
+  "Human security and Peace", "migration, displacement, conflict, armed conflict, national security, human security, organized conflict, climate-induced migration, refugee, peace"
+)
+
+kable(system_table, "html", escape = FALSE, align = "l") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE) %>%
+  column_spec(2, width = "50em", extra_css = "word-wrap: break-word; white-space: normal;")
+
+```
+
+```{r,echo=FALSE}
+# 1) Initialize SystemType and relocate
+adaptdata$SystemType <- ""
+adaptdata <- adaptdata %>% relocate(SystemType, .after = HazardType)
+
+# 2) Define your system‐to‐pattern map
+sys_patterns <- list(
+  Crop = paste(
+    "crop", "cropping systems", "crop production", "yield", "cultivated area",
+    "agriculture", "agricultural", "agricultural production", "agricultural pests",
+    "pest", "irrigated", "rain-fed", "farming", "land use planning", "crop loss","agroecological zone","production", sep = "|"
+  ),
+  
+  Livestock = paste(
+    "livestock", "pasture", "pastoralist", "pastoral area", "grazing", 
+    "animal health", "productivity losses", "herder", "livestock loss", sep = "|"
+  ),
+  
+  `Fisheries and aquaculture` = paste(
+    "fish", "fisheries", "aquaculture", "fishing", "marine harvest", sep = "|"
+  ),
+  
+  Forest = paste(
+    "forest", "forestry", "forest product", "tree", "non-timber", sep = "|"
+  ),
+  
+  Terrestrial = paste(
+    "terrestrial ecosystem", "terrestrial", "drylands", "land resource", 
+    "natural resource", "ecosystem structure", "ecosystem services",
+    "ecological system", "desertification", "land degradation", 
+    "soil degradation", "soil erosion", "environment", sep = "|"
+  ),
+  
+  Freshwater = paste(
+    "freshwater", "wetlands", "inland wetlands", "water resource", "drinking water",
+    "potable water", "water quality", "water availability", "water supply",
+    "river", "water scarcity", "water shortage", "hydrological cycle",
+    "water stress", "water table", "water source", "groundwater","water supplied","dams", sep = "|"
+  ),
+  
+  Biodiversity = paste(
+    "biodiversity", "flora", "fauna", "species", "species extinction",
+    "extinction", "range of species", "ecosystem change", sep = "|"
+  ),
+  
+  Coastal = paste(
+    "coast", "coastal", "marine", "mangrove", "ocean", "coral", 
+    "beach", "coastal erosion", "sea level rise", "blue carbon", 
+    "coastal ecosystem", "coastal zone","eutrophication","algual bloom", sep = "|"
+  ),
+  
+  `Food and nutrition` = paste(
+    "food security", "food insecure", "food insecurity", "nutrition", 
+    "malnutrition", "hunger", "food safety", "food availability", 
+    "famine", "undernutrition", "overnutrition", "obesity", sep = "|"
+  ),
+  
+  `Gender and inclusion` = paste(
+    "gender", "women", "youth", "children", "elderly", "inclusion",
+    "social exclusion", "vulnerable group", "vulnerable population",
+    "minority group", "indigenous", "small-scale producer", 
+    "pastoralist", "fishing communities", "forest-based communities",
+    "high-risk regions", sep = "|"
+  ),
+  
+  `Livelihoods and poverty` = paste(
+    "livelihood", "poverty", "income", "employment","labor", "economic activity",
+    "loss of income", "loss of livelihood", "safety net","insurance", 
+    "socio-economic development", "tourism", "subsistence", "workforce","economic","tourism","tourists","outdoor activities","ski","vacation",
+    sep = "|"
+  ),
+  
+  Health = paste(
+    "health", "mental health", "morbidity", "mortality", "vector-borne disease",
+    "water-borne disease", "infectious disease", "respiratory disease", 
+    "malaria", "epidemic", "climate-sensitive disease", "heat morbidity","disease","deaths","human lives","pollution","life expectancy", sep = "|"
+  ),
+  
+  `Infrastructure and services` = paste(
+    "infrastructure", "critical infrastructure", "services", "critical services",
+    "road", "bridge", "electricity", "power supply", "energy", 
+    "water supply", "sanitation", "hygiene", "education", "school", 
+    "building", "housing", "settlement", "evacuation", "telecom", 
+    "transport", "waste management","power","hydropower","railways","port","industry","material","industries", sep = "|"
+  ),
+  
+  `Human security and Peace` = paste(
+    "migration", "displacement", "conflict", "armed conflict", 
+    "national security", "human security", "organized conflict", 
+    "climate-induced migration", "refugee", "peace", sep = "|"
+  )
+)
+
+
+# 3) Build a safe text vector (no NAs)
+safe_text <- ifelse(is.na(adaptdata$ElementText), "", adaptdata$ElementText)
+
+# 4) Loop through patterns, appending multiple matches with ";"
+for(type in names(sys_patterns)) {
+  # identify rows to tag
+  idx <- which(
+    adaptdata$Element == "System at risk" &
+    grepl(sys_patterns[[type]], safe_text, ignore.case = TRUE)
+  )
+  
+  if(length(idx)) {
+    current <- adaptdata$SystemType[idx]
+    adaptdata$SystemType[idx] <- ifelse(
+      current == "",
+      type,
+      paste(current, type, sep = ";")
+    )
+  }
+}
+
+# Now any "System at risk" row matching multiple patterns will have
+# e.g. "Crop;Livestock;Food and nutrition" in SystemType.
+
+```
+
+## Coverage of system at risk type 
+
+```{r}
+# Compute number of System at risk rows
+total_system_rows <- sum(adaptdata$Element == "System at risk", na.rm = TRUE)
+
+# Count how many received a classification
+assigned_system_rows <- sum(adaptdata$Element == "System at risk" & adaptdata$SystemType != "", na.rm = TRUE)
+
+# Print basic coverage stats
+cat("**System at Risk Coverage:**", assigned_system_rows, "of", total_system_rows, 
+    "rows were successfully assigned a category.\n")
+cat("**Coverage Rate:**", round(assigned_system_rows / total_system_rows * 100, 1), "%\n")
+
+```
+## System at risk type summary data 
+
+```{r,echo=FALSE}
+library(dplyr)
+library(tidyr)
+library(DT)
+
+# 1. Filter and separate multiple SystemType values
+system_counts <- adaptdata %>%
+  filter(Element == "System at risk" & SystemType != "") %>%
+  separate_rows(SystemType, sep = ";") %>%
+  count(SystemType, sort = TRUE) %>%
+  rename(`System at Risk Category` = SystemType, `Occurrences` = n)
+
+# 2. Display the interactive table
+DT::datatable(
+  system_counts,
+  rownames = FALSE,
+  options = list(
+    pageLength = 10,
+    autoWidth = TRUE,
+    dom = 'tip'
+  )
+)
+
+```
+
+## System at risk type raw data 
+
+```{r,echo=FALSE}
+# Install if needed: install.packages("DT")
+library(DT)
+
+
+# Show only tagged 'System at risk' rows and format long text for tooltip
+tagged_systems <- adaptdata %>%
+  filter(Element == "System at risk", SystemType != "") %>%
+  mutate(
+    ElementText = ifelse(
+      nchar(ElementText) > 50,
+      paste0("<span title='", ElementText, "'>", substr(ElementText, 1, 50), "...</span>"),
+      ElementText
+    )
+  )
+
+# Display the table with tooltips
+DT::datatable(
+  tagged_systems,
+  escape = FALSE,  # Allow HTML
+  options = list(pageLength = 10, autoWidth = TRUE),
+  caption = "📌 Tagged 'System at risk' Rows with Assigned Categories"
+)
+
+
+```
+
+# Step 3: Sectors
+We classify sectors in two ways:
+
+1. **SectorType (IPCC categories)** — based on keywords found in the `Sector` and `SystemType` columns. This follows the sector taxonomy defined in the MPGs (Table 1).
+2. **SectorType_GGA (GGA themes)** — which maps the IPCC categories into broader Global Goal on Adaptation (GGA) thematic groups as per the protocol.
+
+The tagging logic first applies regular expressions to the text in `Sector`, with some fallback rules based on the `SystemType` when relevant. The classification is additive and accounts for overlapping sector concepts.
+
+Below is a summary table of sector categories and the associated keywords used.
+
+
+### SectorType (IPCC categories) - Keywords used
+
+```{r,echo=FALSE}
+library(knitr)
+library(kableExtra)
+library(tibble)
+
+sector_table <- tribble(
+  ~`IPCC Sector Category`, ~`Keywords / Match Terms`,
+  "Food, fiber and other ecosystem products", "agri, agro, food, crop, livestock, animal, fish, fisheries, aquacultur, seed, irrigation, value chain, land use, land tenure, land and forestry, agriculture, Agriculture and food security, Agriculture, Climate services, Others, forest and other land uses",
+  "Terrestrial and freshwater ecosystems", "forest, environ, ecosystem, biodiversity, natural, ecology, wildlife, REDD, peatland, protected area",
+  "Ocean and coastal ecosystems", "ocean, marine, coast, coastal land use, coastal zone, blue carbon, mangrove",
+  "Water, sanitation and hygiene", "sanitation, water and sanitation, sewerage, hygiene, water use, water security",
+  "Cities, settlements and key infrastructure", "city, cities, urban, settlement, infrastructure, housing, habitat, industr, waste, transport, energy, landfills, mining, mineral resources, telecommunications",
+  "Health, wellbeing and communities", "health, well-being, wellbeing, nutrition, culture, territorial communities, local knowledge",
+  "Livelihoods, poverty and sustainable development", "social, poverty, people, econom, capacity, education, employment, tourism, rural development, sustainable development, economic and social infrastructure",
+  "Crosscutting", "cross-cutting, cross cutting, cross-sectoral, innovation, research, R&D, integration, empower, gender, women, youth, disaster, risk, climate, meteo, warning, governance, legislation, policy, policies, institution, M&E",
+  "Not specified", "Not specified"
+)
+
+kable(sector_table, "html", escape = FALSE, align = "l") %>%
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>%
+  column_spec(2, width = "50em", extra_css = "word-wrap: break-word; white-space: normal;")
+
+```
+
+### Sector Type_GGA (GGA themes) - Mapped from IPCC categories
+
+```{r,echo=FALSE}
+
+gga_table <- tribble(
+  ~`GGA Sector Theme`, ~`Mapped IPCC Sector Categories`,
+  "Water and sanitation", "Water, sanitation and hygiene",
+  "Food and agriculture", "Food, fiber and other ecosystem products",
+  "Health", "Health, wellbeing and communities",
+  "Biodiversity and ecosystems", "Terrestrial and freshwater ecosystems; Ocean and coastal ecosystems",
+  "Infrastructure and human settlements", "Cities, settlements and key infrastructure",
+  "Poverty eradication and livelihoods", "Livelihoods, poverty and sustainable development",
+  "Not specified", "Not specified"
+)
+
+kable(gga_table, "html", escape = FALSE, align = "l") %>%
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>%
+  column_spec(2, width = "40em", extra_css = "word-wrap: break-word; white-space: normal;")
+
+```
+
+
+```{r,echo=FALSE}
+# Create new column for classified sectors, move column to the front
+adaptdata$SectorType <- ""
+adaptdata <- adaptdata %>% relocate(SectorType, .after = Sector)
+
+# Not specified, if the sector has not been mentioned in the source document
+adaptdata$SectorType[grep("Not specified", 
+                          adaptdata$Sector, ignore.case = TRUE)] <- "Not specified"
+
+#Livelihoods, Poverty and Sustainable development
+adaptdata$SectorType[grep("(social|poverty|people|protection|employment|econom|rural development|sustainable development|tourism|education|capacity|transfer)", 
+                         adaptdata$Sector, ignore.case = TRUE)] <- "Livelihoods, poverty, sustainable development"
+
+#Health, Well-being, and communities
+  # Matches all terms except "Culture" case-insensitively
+adaptdata$SectorType[grep("(health|well-being|nutrition|territorial communities|Local knowledge)", 
+                          adaptdata$Sector, ignore.case = TRUE)] <- "Health, wellbeing, communities"
+  # Matches only "Culture" with a capital "C"
+adaptdata$SectorType[grep("Culture", 
+                          adaptdata$Sector)] <- "Health, wellbeing, communities"
+
+#Cities, Settlements and Infrastructures
+adaptdata$SectorType[grep("(city|cities|urban|infrastructure|Infrastructure, transport and building|settlement|housing|habitat|industr|waste|transport|mining|energy|mineral resources|landfills|mineral products)",
+                          adaptdata$Sector, ignore.case = TRUE)] <- "Cities, settlements, key infrastructure"  ## ALSO
+adaptdata$SectorType[grep("(social infrastructures|capacity)", 
+                          adaptdata$Sector, ignore.case = TRUE)] <- "Livelihoods, poverty, sustainable development"
+
+#Terrestrial and Freshwater Ecosystems
+adaptdata$SectorType[grep("(forest|environ|enviornment|environment|ecosystem|biodiversity|land|natural|ecology|REDD)", 
+                         adaptdata$Sector, ignore.case = TRUE)] <- "Terrestrial, freshwater ecosystems"  ### ALSO:
+adaptdata$SectorType[grep("(Cities and Built Environment|Land Use and Human Settlements Development|sanitary landfills)",
+                          adaptdata$Sector, ignore.case = TRUE)] <- "Cities, settlements, key infrastructure"
+
+#Water, sanitation, hygiene
+adaptdata$SectorType[grep("(water|sanitation|water, sanitation and waste|Hygiene|sewerage|water security|water and energy|water use)",
+                          adaptdata$Sector, ignore.case = TRUE)] <- "Water, sanitation, hygiene"
+
+#Ocean and Coastal Ecosystems
+adaptdata$SectorType[grep("(ocean|coast|coastal|marine|coastal land use|blue carbon)", 
+                          adaptdata$Sector, ignore.case = TRUE)] <- "Ocean, coastal ecosystems"
+
+#Crosscutting
+adaptdata$SectorType[grep("(Crosscutting|all sectors|zone-specific|General|cross-sectoral|innovations|research|R&D|integration|empower|gender|women|Gender and social inclusion|legislation|policies|governance|devolution|institution|private|public sector|territory|spatial planning|planning|disaster|risk|climate|climate service|weather|meteo|warning|M&E)", 
+                          adaptdata$Sector, ignore.case = TRUE)] <- "Crosscutting"
+
+# systems at risk are mapped to sectors
+adaptdata$SectorType[grep("(Crop|Livestock|Fisheries and aquaculture|Forest|Food and nutrition)", 
+                          adaptdata$SystemType, ignore.case = TRUE)]  <- "Food, fiber, other ecosystem products"
+adaptdata$SectorType[grep("coastal", 
+                          adaptdata$SystemType, ignore.case = TRUE)]  <- "Ocean, coastal ecosystems"
+adaptdata$SectorType[grep("(Terrestrial|Freshwater|Biodiversity)", 
+                          adaptdata$SystemType, ignore.case = TRUE)]  <- "Terrestrial, freshwater ecosystems"
+adaptdata$SectorType[grep("(Health|Human security)", 
+                          adaptdata$SystemType, ignore.case = TRUE)]  <- "Health, wellbeing, communities"
+adaptdata$SectorType[grep("Livelihoods and poverty", 
+                          adaptdata$SystemType, ignore.case = TRUE)]  <- "Livelihoods, poverty, sustainable development"
+adaptdata$SectorType[grep("Gender and inclusion", 
+                          adaptdata$SystemType, ignore.case = TRUE)]  <- "Crosscutting"
+adaptdata$SectorType[grep("Infrastructure and services", 
+                          adaptdata$SystemType, ignore.case = TRUE)]  <- "Cities, settlements, key infrastructure"
+
+# ALSO: 
+adaptdata$SectorType[grep("(Tourism and Coastal Zone Management|Coastal zone management)", 
+                          adaptdata$Sector, ignore.case = TRUE)] <- "Ocean, coastal ecosystems"
+
+adaptdata$SectorType[grep("(Vulnerable communities|Territorial development)", 
+                          adaptdata$Sector, ignore.case = TRUE)] <- "Health, wellbeing, communities"
+
+adaptdata$SectorType[grep("(Private sector/trade; Manufacturing; Business process|Habitat, urban planning and development of the territory|Housing, Territorial Development and Urban Planning|Renewable Energy|Urban planning and infrastructure|Urban Development & Tourism|Telecommunications)", 
+                          adaptdata$Sector, ignore.case = TRUE)] <- "Cities, settlements, key infrastructure"
+
+adaptdata$SectorType[grep("(Agriculture; Livestock; Fisheries|Agriculture and food security|Agriculture, Climate services, Others|Sustainable development, Agriculture)", 
+                          adaptdata$Sector, ignore.case = TRUE)] <- "Food, fiber, other ecosystem products"
+
+adaptdata$SectorType[grep("(Multiple: Social Economy, Tourism|Multiple: Social Affairs, Women and Family|Multiple: Planning, Rural development|Multiple: Sustainable development, Planning|Education, research|Education, training, research)", 
+                          adaptdata$Sector, ignore.case = TRUE)] <- "Livelihoods, poverty, sustainable development"
+
+#Food, Fiber and Other ecosystem products
+adaptdata$SectorType[grep("(agriculture|food|crop|livestock|animal|fish|fisheries|aquaculture|seed|irrigation|value chain|land use|land tenure|land and forestry|Agriculture, forest and other land uses|land affairs|land reforms)", 
+                          adaptdata$Sector, ignore.case = TRUE)] <- "Food, fiber, other ecosystem products"
+
+adaptdata$SectorType[grep("coastal land use|marine", 
+                          adaptdata$Sector, ignore.case = TRUE)] <- "Ocean, coastal ecosystems"
+adaptdata$SectorType[grep("Land Use and Human Settlements Development", 
+                          adaptdata$Sector, ignore.case = TRUE)] <- "Cities, settlements, key infrastructure"
+```
+
+
+
+```{r,echo=FALSE}
+# Create new column for GGA sector classification
+adaptdata$SectorType_GGA <- ""
+
+# Classify based on IPCC sector types already assigned
+adaptdata$SectorType_GGA[grep("Water, sanitation, hygiene", adaptdata$SectorType, ignore.case = TRUE)] <- "Water and sanitation"
+adaptdata$SectorType_GGA[grep("Food, fiber, other ecosystem products", adaptdata$SectorType, ignore.case = TRUE)] <- "Food and agriculture"
+adaptdata$SectorType_GGA[grep("Health, wellbeing, communities", adaptdata$SectorType, ignore.case = TRUE)] <- "Health"
+
+# Terrestrial and Ocean ecosystems both map to "Biodiversity and ecosystems"
+adaptdata$SectorType_GGA[grep("Terrestrial, freshwater ecosystems|Ocean, coastal ecosystems", adaptdata$SectorType, ignore.case = TRUE)] <- "Biodiversity and ecosystems"
+
+adaptdata$SectorType_GGA[grep("Cities, settlements, key infrastructure", adaptdata$SectorType, ignore.case = TRUE)] <- "Infrastructure and human settlements"
+adaptdata$SectorType_GGA[grep("Livelihoods, poverty, sustainable development", adaptdata$SectorType, ignore.case = TRUE)] <- "Poverty eradication and livelihoods"
+
+# If not specified in IPCC, keep it "Not specified"
+adaptdata$SectorType_GGA[grep("Not specified", adaptdata$SectorType, ignore.case = TRUE)] <- "Not specified"
+
+```
+
+## Sector coverage 
+
+```{r}
+library(DT)
+
+# Count rows classified under SectorType
+total_sector_rows <- sum(!is.na(adaptdata$Sector))
+classified_sector_rows <- sum(adaptdata$SectorType != "")
+classified_sector_rows_gga <- sum(adaptdata$SectorType_GGA != "")
+
+cat("**SectorType (IPCC):**", classified_sector_rows, "of", total_sector_rows, "rows tagged\n")
+cat("**SectorType_GGA (GGA):**", classified_sector_rows_gga, "of", total_sector_rows, "rows tagged\n")
+cat("**Coverage Rate:**", round(classified_sector_rows / total_sector_rows * 100, 1), "%\n\n")
+
+
+
+```
+## Sector type summary 
+
+```{r,echo=FALSE}
+library(dplyr)
+library(DT)
+
+# --- IPCC Sector Type Frequency ---
+sector_ipcc_counts <- adaptdata %>%
+  filter(SectorType != "") %>%
+  count(SectorType, sort = TRUE) %>%
+  rename(`IPCC Sector Category` = SectorType, `Occurrences` = n)
+
+# --- GGA Sector Type Frequency ---
+sector_gga_counts <- adaptdata %>%
+  filter(SectorType_GGA != "") %>%
+  count(SectorType_GGA, sort = TRUE) %>%
+  rename(`GGA Sector Category` = SectorType_GGA, `Occurrences` = n)
+
+# --- Display both tables side by side (optional tweak: two columns, one below the other if rendering limits apply) ---
+
+# IPCC Sector Table
+DT::datatable(
+  sector_ipcc_counts,
+  rownames = FALSE,
+  caption = "📊 IPCC Sector Categories (SectorType)",
+  options = list(pageLength = 10, autoWidth = TRUE, dom = 'tip')
+)
+
+
+# GGA Sector Table
+DT::datatable(
+  sector_gga_counts,
+  rownames = FALSE,
+  caption = "📊 GGA Sector Themes (SectorType_GGA)",
+  options = list(pageLength = 10, autoWidth = TRUE, dom = 'tip')
+)
+
+```
+
+## Sector type raw data 
+
+```{r,echo=FALSE}
+# View tagged rows
+library(dplyr)
+library(DT)
+
+# Prepare the data with hover tooltips for long 'Sector' values
+sector_tagged <- adaptdata %>%
+  filter(SectorType != "" | SectorType_GGA != "") %>%
+  mutate(
+    Sector = ifelse(
+      nchar(Sector) > 50,
+      paste0("<span title='", Sector, "'>", substr(Sector, 1, 50), "...</span>"),
+      Sector
+    )
+  )
+
+# Render the datatable with HTML tooltips
+datatable(
+  sector_tagged,
+  escape = FALSE,  # Allow HTML for tooltips
+  options = list(pageLength = 10, autoWidth = TRUE),
+  caption = "🏷️ Tagged Sector Rows with IPCC and GGA Classification"
+)
+
+```
+
+# link to overview
+
+```{r}
+# Ensure both datasets have the Country column
+# Check for extra whitespace or formatting issues
+adaptdata$Country <- trimws(adaptdata$Country)
+overview$Country <- trimws(overview$Country)
+
+# Merge metadata from 'overview' to 'adaptdata' by Country
+adaptdata <- merge(adaptdata, overview, by = "Country", all.x = TRUE)
+
+```
+
+# Save data to a local file
+
+```{r}
+# Convert any list columns to character columns
+adaptdata[] <- lapply(adaptdata, function(col) {
+  if (is.list(col)) {
+    sapply(col, function(x) paste(unlist(x), collapse = "; "))
+  } else {
+    col
+  }
+})
+
+write.csv(adaptdata,"AdaptationElementsProcessed.csv")
+```
+
+# Remarks
+
+- **Hazard Type:**  
+  A few additional climate-related keywords were added to improve coverage. For example, terms like *“dry days”*, *“surface air temperature”*, and *“heat stress”* appeared frequently and were added under appropriate hazard categories.  
+  However, we also encountered terms such as *“runoff”*, *“solar radiation”*, and *“winds”* that were not clearly assignable to a single hazard category and remain unclassified for now.
+
+- **System at Risk:**  
+  We expanded the keyword list to better capture common themes in the data:
+  
+  - **Coastal:** Added terms like *“eutrophication”* and *“algual bloom”*, which frequently occur in the context of coastal or marine environmental issues.
+  - **Livelihoods and Poverty:** Included tourism-related terms such as *“tourism”*, *“tourists”*, *“ski”*, *“vacation”*, and *“outdoor activities”*, to capture socio-economic impacts on income and livelihoods.
+  - **Infrastructure and Services:** Extended to include infrastructure and utility-related keywords such as *“power”*, *“hydropower”*, *“railways”*, *“port”*, *“industry”*, *“industries”*, and *“material”*.
+  - **Health:** Added terms like *“pollution”*, *“deaths”*, *“human lives”*, and *“life expectancy”* to better reflect public health consequences mentioned in the data.
+ 
+
+  ⚠️ **Note:** We observed several rows tagged as *System at risk* that likely describe hazards rather than systems, as they do not mention any system but describe a climate hazard (e.g., drought or storms). This may warrant a second look or reclassification.
+  Some examples 
+  
+  - Climate change is projected to cause longer and dryer dry seasons and shorter rainy seasons
+  - Increased frequency and intensity of flooding in vulnerable areas
+  - Another precursor to higher drought incidence will be the expected change in rainfall variability, with the number of rainfall days decreasing, especially in spring and summer, while the intensity of individual rainfall events increases.
+  - Seychelles is projected to experience increased average temperatures and changes in rainfall patterns, leading to more frequent and intense rainfall events, including flooding and landslides, and potentially longer periods of drought
+
+
+- **Sector Tagging (IPCC & GGA):**  
+  Sector tagging shows **strong overall coverage**, particularly due to the mapping from both direct sector mentions and `SystemType`.  
+  That said, a number of rows still remain **unclassified**, either because sector information wasn't mentioned explicitly in the original source or because it was too ambiguous to map reliably. It's unclear whether these untagged rows should be a concern, but they could be flagged for manual review depending on use case.
