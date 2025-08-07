@@ -63,7 +63,7 @@ hazard_keywords <- tribble(
   
   "Storm", "storm, tropical storm, cyclone, cyclones, Cyclonic activity, typhoon, typhoons, hail, lightning, thunderstorm, heavy rain, windstorm, sand storm, dust storm, tornado, violent rains, torrential, strong winds",
   
-  "Drought", "drought, drought cycle, prolonged droughts, drougths, dry spell, dry days, ardity",
+  "Drought", "drought, drought cycle, prolonged droughts, drougths, dry spell, dry days, aridity",
   
   "Wildfire", "wildfire, wild fire, forest fire, land fire, bush fire, pasture fire, fire",
   
@@ -115,7 +115,7 @@ haz_patterns <- list(
   ),
   
   "Drought" = paste(
-    "drought", "drought cycle", "prolonged droughts","drougths","dry spell","dry days","ardity", sep = "|"
+    "drought", "drought cycle", "prolonged droughts","drougths","dry spell","dry days","aridity", sep = "|"
   ),
   
   "Wildfire" = paste(
