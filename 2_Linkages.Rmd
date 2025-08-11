@@ -1,0 +1,367 @@
+---
+title: "BTR Coherence and Linkages"
+author:
+  - name: "Lolita Muller"
+    email: "m.lolita@cgiar.org"
+    orcid: "0009-0002-8345-7219"
+
+date: "2025-08-17"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+---
+## Method to Assess Coherence in BTR Adaptation Components
+
+This report applies a reproducible, rule-based approach to assess the **coherence** of adaptation information in Biennial Transparency Reports (BTRs) by detecting explicit **linkages** between climate **hazards** and **systems** within specific elements of each document.  
+
+Each row is tagged by *Element* (e.g., *System at risk*, *Adaptation priorities*, *Action*, *Result*) and enriched with **HazardType** and **SystemType** labels. When tags are empty, we use regex fallbacks to find mentions — generic terms like “resilience” only count toward hazards when the same text includes the word **“climate”**.  
+
+For every document (**Country × Document × Year of Submission**), we compute seven binary variables by scanning the **appropriate target element** for the required mentions:
+
+- **HazardSystem** → hazard terms in *System at risk*  
+- **HazardPriority** → hazard terms in *Adaptation priorities*  
+- **HazardAction** → hazard terms in *Action*  
+- **HazardResult** → hazard terms in *Result*  
+- **SystemPriority** → system terms in *Adaptation priorities*  
+- **SystemAction** → system terms in *Action*  
+- **SystemResult** → system terms in *Result*  
+
+**Scoring rules:**
+- **1** → any row in the target element contains the required mentions (via tags or regex)  
+- **0** → the element exists but no required mentions are found  
+- **NA** → the target element is absent from the document  
+
+For transparency, the per-document summary stores the first triggering snippet *(EntryID + Element + excerpt)* when a linkage equals 1. Row-level data retain the original *ElementText* and receive the document-level flags for convenience:
+- Hazard* flags are populated on *Hazard* rows  
+- System* flags are populated on *System at risk* rows  
+
+Aggregated outputs show:
+1. Which countries accumulate the most linkages across their documents  
+2. Which linkage types are most frequent globally  
+
+This supports quick quality checks and iterative refinement of keyword dictionaries where needed.
+
+```{r}
+# 0) Load data & libs ----------------------------------------------------------
+library(readr)
+library(dplyr)
+library(stringr)
+library(tidyr)
+
+adaptdata <- read_csv("AdaptationElementsProcessed.csv")
+```
+
+
+```{r}
+# ---- Basic checks & prep -----------------------------------------------------
+needed_cols <- c("Country","Document","Element","ElementText","HazardType","SystemType",
+                 "Year of Submission","EntryID")
+missing_cols <- setdiff(needed_cols, names(adaptdata))
+if (length(missing_cols)) {
+  stop(sprintf("Missing required column(s): %s", paste(missing_cols, collapse = ", ")))
+}
+
+rows_aug <- adaptdata %>%
+  mutate(
+    ElementText = ifelse(is.na(ElementText), "", ElementText),
+    txt = tolower(ElementText),
+    has_hazard_tag = !is.na(HazardType) & HazardType != "",
+    has_system_tag = !is.na(SystemType) & SystemType != ""
+  )
+
+# 1) Regex fallbacks for detection --------------------------------------------
+hazard_terms <- paste(
+  "\\bheat( wave|wave)?\\b","excessive heat","high temperature","extreme (temperature|heat)",
+  "cold (wave|spell|snap)","\\bsnow\\b","\\bice\\b","\\bfrost\\b","freeze","severe winter",
+  "storm","tropical storm","cyclone","typhoon","hail","lightning","thunderstorm",
+  "heavy rain","windstorm","sand storm","dust storm","tornado","torrential","strong winds?",
+  "droughts?","dry (spell|days?)","aridity",
+  "wild ?fire(s)?","forest fire(s)?","bush ?fire(s)?",
+  "landslides?",
+  "flood(s|ing)?","inundation",
+  "temperature (rise|increase|change|warming|drop)","rising temperatures?",
+  "change in precipitation","rainfall (variability|patterns?|distribution|intensity|frequency)",
+  "salin(i[sz]ation|ity)","erosion","desertification",
+  "sea[ -]?level (rise|increase)","coastal (flooding|erosion|submersion|retreat|beach loss)",
+  "sea (surface )?temperature","ocean temperature","ocean acidification","acidification",
+  "pest(s)?","vector-borne","disease(s)?","infestation","invasive species",
+  sep="|"
+)
+
+system_terms <- paste(
+  "\\bcrop(s|ping)?\\b","agri(culture|cultural)?","yield","rain[- ]?fed","irrigat","farming",
+  "livestock","pasture","pastoral(ist)?","grazing","herder",
+  "fish(ery|eries)?","aquaculture","fishing","marine harvest",
+  "forest(ry)?","tree(s)?","non[- ]timber",
+  "terrestrial","drylands?","ecosystem(s)?","ecosystem services?","ecological system",
+  "desertification","land degradation","soil (degradation|erosion)",
+  "freshwater","wetlands?","water resource(s)?","drinking water","potable water",
+  "water (quality|availability|supply|scarcity|shortage|stress|table|source)","river(s)?",
+  "groundwater","hydrolog(y|ical)","dams?",
+  "biodiversit(y|ies)","flora","fauna","species","extinction",
+  "coast(al)?","mangrove(s)?","ocean","coral(s)?","beach(es)?","blue carbon",
+  "coastal (ecosystem|zone|erosion|land use|management)",
+  "food (security|safety|availability|insecurity|insecure)","nutrition|malnutrition|hunger|famine",
+  "\\bgender\\b","women","youth","children","elderly","indigenous","minority","vulnerable (group|population)",
+  "livelihood(s)?","poverty","income","employment","labor","tourism|tourists?|ski|vacation|outdoor activities",
+  "\\bhealth\\b","morbidity|mortality","vector[- ]borne|water[- ]borne|infectious|respiratory disease",
+  "infrastructure|critical services?","road(s)?|bridge(s)?","electricity|power supply|energy",
+  "sanitation|hygiene","education|school(s)?","building|housing|settlement(s)?",
+  "telecom(munication)?","transport","waste management","hydropower","rail(way|ways)","port(s)?","industry","industries","material(s)?",
+  "migration","displacement","conflict","armed conflict","human security","refugee","peace",
+  sep="|"
+)
+```
+
+
+```{r}
+# 2) Row-level detection flags ------------------------------------------------
+rows_aug <- rows_aug %>%
+  mutate(
+    RowHasHazardTerms =
+      has_hazard_tag |
+      str_detect(txt, regex(hazard_terms, ignore_case = TRUE)),
+    RowHasSystemTerms =
+      has_system_tag |
+      str_detect(txt, regex(system_terms, ignore_case = TRUE))
+  )
+
+# 3) Helper for evidence (first triggering row) --------------------------------
+first_snippet <- function(df, cond) {
+  hit <- df %>% filter({{ cond }})
+  if (nrow(hit) == 0) return(NA_character_)
+  s <- substr(hit$ElementText[1], 1, 200)
+  s <- gsub("\\s+", " ", s)
+  paste0("[", hit$EntryID[1], " • ", hit$Element[1], "] ", s,
+         ifelse(nchar(hit$ElementText[1]) > 200, "…", ""))
+}
+
+if (!"Year of Submission" %in% names(rows_aug)) {
+  stop("Column 'Year of Submission' not found.")
+}
+
+# 4) Compute ALL linkages (4–13) in one place ---------------------------------
+# 4–10 as before
+linkage_summary_core <- rows_aug %>%
+  group_by(Country, Document, `Year of Submission`) %>%
+  summarise(
+    HazardSystem   = as.integer(any(RowHasHazardTerms[Element == "System at risk"], na.rm = TRUE)),
+    HazardPriority = as.integer(any(RowHasHazardTerms[Element == "Adaptation priorities"], na.rm = TRUE)),
+    HazardAction   = as.integer(any(RowHasHazardTerms[Element == "Action"], na.rm = TRUE)),
+    HazardResult   = as.integer(any(RowHasHazardTerms[Element == "Result"], na.rm = TRUE)),   # NOT "Indicator"
+    SystemPriority = as.integer(any(RowHasSystemTerms[Element == "Adaptation priorities"], na.rm = TRUE)),
+    SystemAction   = as.integer(any(RowHasSystemTerms[Element == "Action"], na.rm = TRUE)),
+    SystemResult   = as.integer(any(RowHasSystemTerms[Element == "Result"], na.rm = TRUE)),   # NOT "Indicator"
+    .groups = "drop"
+  )
+
+# 11–13 rules (PriorityAction, PriorityResult = co-presence; ActionResult = explicit)
+link_phrases <- paste(
+  "as a result of", "resulted in", "led to", "due to the implementation",
+  "following the implementation", "following (the )?deployment", "because of the implementation",
+  "the action (achieved|led)", "implementation of", "outputs? of (the )?action",
+  "outcomes? of (the )?action", "enabled", "contributed to", "achieved",
+  sep = "|"
+)
+
+linkage_11_13_core <- rows_aug %>%
+  group_by(Country, Document, `Year of Submission`) %>%
+  summarise(
+    PriorityAction = as.integer(any(Element == "Adaptation priorities") & any(Element == "Action")),
+    PriorityResult = as.integer(any(Element == "Adaptation priorities") & any(Element == "Result")),
+    ActionResult = {
+      has_action <- any(Element == "Action")
+      has_result <- any(Element == "Result")
+      if (has_action && has_result) {
+        as.integer(any(str_detect(txt[Element == "Result"], regex(link_phrases, ignore_case = TRUE))))
+      } else {
+        NA_integer_
+      }
+    },
+    .groups = "drop"
+  )
+```
+
+
+```{r}
+# Combine 4–10 with 11–13
+linkage_summary_core <- linkage_summary_core %>%
+  left_join(linkage_11_13_core, by = c("Country","Document","Year of Submission"))
+
+# 5) Evidence for ALL linkages (4–13) -----------------------------------------
+linkage_evidence <- rows_aug %>%
+  group_by(Country, Document, `Year of Submission`) %>%
+  group_modify(~ {
+    prio_rows   <- .x %>% filter(Element == "Adaptation priorities")
+    action_rows <- .x %>% filter(Element == "Action")
+    result_rows <- .x %>% filter(Element == "Result")
+
+    # evidence for 4–10 (first triggering rows)
+    ev4  <- first_snippet(.x %>% filter(Element == "System at risk"),        RowHasHazardTerms)
+    ev5  <- first_snippet(.x %>% filter(Element == "Adaptation priorities"), RowHasHazardTerms)
+    ev6  <- first_snippet(.x %>% filter(Element == "Action"),                RowHasHazardTerms)
+    ev7  <- first_snippet(.x %>% filter(Element == "Result"),                RowHasHazardTerms)
+    ev8  <- first_snippet(.x %>% filter(Element == "Adaptation priorities"), RowHasSystemTerms)
+    ev9  <- first_snippet(.x %>% filter(Element == "Action"),                RowHasSystemTerms)
+    ev10 <- first_snippet(.x %>% filter(Element == "Result"),                RowHasSystemTerms)
+
+    # evidence for 11–13
+    snip_prio   <- if (nrow(prio_rows))   first_snippet(prio_rows,   TRUE) else NA_character_
+    snip_action <- if (nrow(action_rows)) first_snippet(action_rows, TRUE) else NA_character_
+    snip_result <- if (nrow(result_rows)) first_snippet(result_rows, TRUE) else NA_character_
+    res_hits    <- result_rows %>% filter(str_detect(txt, regex(link_phrases, ignore_case = TRUE)))
+    ev13        <- if (nrow(res_hits)) first_snippet(res_hits, TRUE) else NA_character_
+
+    tibble(
+      Variable = c("HazardSystem","HazardPriority","HazardAction","HazardResult",
+                   "SystemPriority","SystemAction","SystemResult",
+                   "PriorityAction","PriorityResult","ActionResult"),
+      Evidence = c(
+        ev4, ev5, ev6, ev7, ev8, ev9, ev10,
+        if (!is.na(snip_prio) && !is.na(snip_action)) paste0(snip_prio, " | ", snip_action) else NA_character_,
+        if (!is.na(snip_prio) && !is.na(snip_result)) paste0(snip_prio, " | ", snip_result) else NA_character_,
+        ev13
+      )
+    )
+  }) %>% ungroup()
+
+ev_wide <- linkage_evidence %>%
+  mutate(Variable = paste0("Ev_", Variable)) %>%
+  pivot_wider(names_from = Variable, values_from = Evidence)
+
+# Final linkage summary (all variables + evidence)
+linkage_summary <- linkage_summary_core %>%
+  left_join(ev_wide, by = c("Country","Document","Year of Submission"))
+```
+
+
+```{r}
+# 6) Merge ALL linkages back into adaptdata (row-scoped) ----------------------
+# 4–10: keep flags on their target element rows
+# 11–13: populate on relevant rows:
+#   - PriorityAction on Adaptation priorities & Action rows
+#   - PriorityResult on Adaptation priorities & Result rows
+#   - ActionResult   on Action & Result rows
+adaptdata <- adaptdata %>%
+  left_join(linkage_summary_core, by = c("Country","Document","Year of Submission")) %>%
+  mutate(
+    HazardSystem   = ifelse(Element == "System at risk",         HazardSystem,   NA_integer_),
+    HazardPriority = ifelse(Element == "Adaptation priorities",  HazardPriority, NA_integer_),
+    HazardAction   = ifelse(Element == "Action",                  HazardAction,   NA_integer_),
+    HazardResult   = ifelse(Element == "Result",                  HazardResult,   NA_integer_),
+
+    SystemPriority = ifelse(Element == "Adaptation priorities",  SystemPriority, NA_integer_),
+    SystemAction   = ifelse(Element == "Action",                  SystemAction,   NA_integer_),
+    SystemResult   = ifelse(Element == "Result",                  SystemResult,   NA_integer_),
+
+    PriorityAction = ifelse(Element %in% c("Adaptation priorities","Action"), PriorityAction, NA_integer_),
+    PriorityResult = ifelse(Element %in% c("Adaptation priorities","Result"), PriorityResult, NA_integer_),
+    ActionResult   = ifelse(Element %in% c("Action","Result"),                 ActionResult,   NA_integer_)
+  )
+```
+
+
+```{r}
+# 7) Analytics (countries & linkage types) ------------------------------------
+# For original 7 (4–10)
+linkage_vars <- c(
+  "HazardSystem","HazardPriority","HazardAction","HazardResult",
+  "SystemPriority","SystemAction","SystemResult"
+)
+
+by_doc <- linkage_summary %>%
+  mutate(TotalLinks = rowSums(across(all_of(linkage_vars)), na.rm = TRUE))
+
+by_country_links <- by_doc %>%
+  group_by(Country) %>%
+  summarise(
+    Docs = n(),
+    TotalLinks = sum(TotalLinks),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(TotalLinks), Country)
+
+n_docs <- nrow(linkage_summary)
+
+by_type_links <- linkage_summary %>%
+  summarise(across(all_of(linkage_vars), ~ sum(. == 1, na.rm = TRUE))) %>%
+  pivot_longer(everything(), names_to = "Linkage", values_to = "DocsWithLink") %>%
+  mutate(ShareOfDocs = round(100 * DocsWithLink / n_docs, 1)) %>%
+  arrange(desc(DocsWithLink), Linkage)
+
+# Extended analytics including 11–13
+extended_vars <- c(linkage_vars, "PriorityAction","PriorityResult","ActionResult")
+
+by_doc_all <- linkage_summary %>%
+  mutate(TotalLinks_All = rowSums(across(all_of(extended_vars)), na.rm = TRUE))
+
+by_country_links_all <- by_doc_all %>%
+  group_by(Country) %>%
+  summarise(
+    Docs = n(),
+    TotalLinks_All = sum(TotalLinks_All),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(TotalLinks_All), Country)
+
+by_type_links_all <- linkage_summary %>%
+  summarise(across(all_of(extended_vars), ~ sum(. == 1, na.rm = TRUE))) %>%
+  pivot_longer(everything(), names_to = "Linkage", values_to = "DocsWithLink") %>%
+  mutate(ShareOfDocs = round(100 * DocsWithLink / n_docs, 1)) %>%
+  arrange(desc(DocsWithLink), Linkage)
+```
+
+
+```{r}
+# 8) Display (DT if available) -------------------------------------------------
+
+  DT::datatable(
+    by_country_links,
+    options = list(pageLength = 15, autoWidth = TRUE, dom = 'tip'),
+    caption = "🏆 Countries with Most Linkages (7 variables: 4–10)"
+  )
+
+  DT::datatable(
+    by_type_links,
+    options = list(pageLength = 10, autoWidth = TRUE, dom = 'tip'),
+    caption = "📊 Linkage Types by Frequency (7 variables: 4–10)"
+  )
+  
+  DT::datatable(
+    by_country_links_all,
+    options = list(pageLength = 15, autoWidth = TRUE, dom = 'tip'),
+    caption = "🏆 Countries with Most Linkages (Extended: 4–13)"
+  )
+  
+  DT::datatable(
+    by_type_links_all,
+    options = list(pageLength = 10, autoWidth = TRUE, dom = 'tip'),
+    caption = "📊 Linkage Types by Frequency (Extended: 4–13)"
+  )
+
+```
+
+
+```{r}
+# 9) (Optional) Save outputs (commented to match your pattern) -----------------
+# write.csv(linkage_summary,        "LinkageSummary_withEvidence.csv", row.names = FALSE)
+# write.csv(linkage_evidence,       "LinkageEvidence_long_4to13.csv", row.names = FALSE)
+# write.csv(adaptdata,              "AdaptationElements_withAllLinkages.csv", row.names = FALSE)
+# write.csv(by_country_links,       "Linkage_Countries_Totals_7vars.csv", row.names = FALSE)
+# write.csv(by_type_links,          "Linkage_Types_Frequency_7vars.csv", row.names = FALSE)
+# write.csv(by_country_links_all,   "Linkage_Countries_Totals_10vars.csv", row.names = FALSE)
+# write.csv(by_type_links_all,      "Linkage_Types_Frequency_10vars.csv", row.names = FALSE)
+```
+
+
+```{r}
+# ---- 5) Save outputs --------------------------------------------------------
+# write.csv(linkage_summary,        "LinkageSummary_withEvidence.csv", row.names = FALSE)
+# write.csv(linkage_evidence,       "LinkageEvidence_long.csv",       row.names = FALSE)
+# write.csv(adaptdata_with_flags,   "AdaptationElements_withLinkages.csv", row.names = FALSE)
+
+
+```
+
