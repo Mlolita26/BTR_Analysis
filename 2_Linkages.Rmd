@@ -14,9 +14,9 @@ output:
 ---
 ## Method to Assess Coherence in BTR Adaptation Components
 
-This report applies a reproducible, rule-based approach to assess the **coherence** of adaptation information in Biennial Transparency Reports (BTRs) by detecting explicit **linkages** between climate **hazards** and **systems** within specific elements of each document.  
+This report uses a reproducible, rule-based approach to assess the **coherence** of adaptation information in Biennial Transparency Reports (BTRs) by detecting explicit **linkages** between climate **hazards** and **systems** within specific elements of each document.
 
-Each row is tagged by *Element* (e.g., *System at risk*, *Adaptation priorities*, *Action*, *Result*) and enriched with **HazardType** and **SystemType** labels. When tags are empty, we use regex fallbacks to find mentions — generic terms like “resilience” only count toward hazards when the same text includes the word **“climate”**.  
+Each row is tagged by *Element* (e.g., *System at risk*, *Adaptation priorities*, *Action*, *Result*) and enriched with **HazardType** and **SystemType** labels. When tags are empty, we use regex fallbacks to capture direct mentions in the *ElementText*.
 
 For every document (**Country × Document × Year of Submission**), we compute seven binary variables by scanning the **appropriate target element** for the required mentions:
 
@@ -26,36 +26,54 @@ For every document (**Country × Document × Year of Submission**), we compute s
 - **HazardResult** → hazard terms in *Result*  
 - **SystemPriority** → system terms in *Adaptation priorities*  
 - **SystemAction** → system terms in *Action*  
-- **SystemResult** → system terms in *Result*  
+- **SystemResult** → system terms in *Result*
 
-**Scoring rules:**
-- **1** → any row in the target element contains the required mentions (via tags or regex)  
-- **0** → the element exists but no required mentions are found  
-- **NA** → the target element is absent from the document  
 
-For transparency, the per-document summary stores the first triggering snippet *(EntryID + Element + excerpt)* when a linkage equals 1. Row-level data retain the original *ElementText* and receive the document-level flags for convenience:
+### Scoring rules
+- **1** — At least one row in the target element contains the required mentions (via tags or regex).  
+- **0** — The target element exists in the document but contains **no** required mentions.  
+- **NA** — The target element is **absent** from the document.
+
+### Evidence
+For transparency, the per-document summary stores the **first triggering snippet** *(EntryID • Element • excerpt)* when a linkage equals **1**. Row-level data keep the original *ElementText* and receive the document-level flags for convenience:
+
 - Hazard* flags are populated on *Hazard* rows  
-- System* flags are populated on *System at risk* rows  
+- System* flags are populated on *System at risk* rows
 
-Aggregated outputs show:
-1. Which countries accumulate the most linkages across their documents  
-2. Which linkage types are most frequent globally  
+### Aggregated outputs
+We report: 
+1.which countries accumulate the most linkages across their documents and 
+2. which linkage types are most frequent globally. This supports rapid quality checks and iterative refinement of keyword dictionaries where needed.
 
-This supports quick quality checks and iterative refinement of keyword dictionaries where needed.
 
-```{r}
-# 0) Load data & libs ----------------------------------------------------------
+```{r setup, include=FALSE,warning=FALSE,message=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
 library(readr)
-library(dplyr)
-library(stringr)
-library(tidyr)
-
 adaptdata <- read_csv("AdaptationElementsProcessed.csv")
+
+```
+
+```{r,echo=FALSE}
+# ============================================================
+# Linkage scoring (Variables 4–10) + Evidence Summary
+# - No renaming of Element values
+# - "Indicator" is NOT counted as "Result"
+# - Evidence ONLY in the per-document summary (not in adaptdata)
+# ============================================================
+
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(stringr)
+  library(tidyr)
+})
 ```
 
 
-```{r}
-# ---- Basic checks & prep -----------------------------------------------------
+```{r,echo=FALSE}
+# ---- 0) Basic checks & prep -------------------------------------------------
 needed_cols <- c("Country","Document","Element","ElementText","HazardType","SystemType",
                  "Year of Submission","EntryID")
 missing_cols <- setdiff(needed_cols, names(adaptdata))
@@ -70,8 +88,17 @@ rows_aug <- adaptdata %>%
     has_hazard_tag = !is.na(HazardType) & HazardType != "",
     has_system_tag = !is.na(SystemType) & SystemType != ""
   )
+```
 
-# 1) Regex fallbacks for detection --------------------------------------------
+### Regex fallback keyword tables
+
+| Detector | Regex patterns used |
+|---|---|
+| **Hazard terms** | `\bheat( wave|wave)?\b`, `excessive heat`, `high temperature`, `extreme (temperature|heat)`, `cold (wave|spell|snap)`, `\bsnow\b`, `\bice\b`, `\bfrost\b`, `freeze`, `severe winter`<br>`storm`, `tropical storm`, `cyclone`, `typhoon`, `hail`, `lightning`, `thunderstorm`, `heavy rain`, `windstorm`, `sand storm`<br>`dust storm`, `tornado`, `torrential`, `strong winds?`, `droughts?`, `dry (spell|days?)`, `aridity`, `wild ?fire(s)?`, `forest fire(s)?`, `bush ?fire(s)?`<br>`landslides?`, `flood(s|ing)?`, `inundation`, `temperature (rise|increase|change|warming|drop)`, `rising temperatures?`, `change in precipitation`, `rainfall (variability|patterns?|distribution|intensity|frequency)`<br>`salin(i[sz]ation|ity)`, `erosion`, `desertification`, `sea[ -]?level (rise|increase)`, `coastal (flooding|erosion|submersion|retreat|beach loss)`, `sea (surface )?temperature`, `ocean temperature`, `ocean acidification`, `acidification`, `pest(s)?`, `vector-borne`, `disease(s)?`, `infestation`, `invasive species` |
+| **System terms** | `\bcrop(s|ping)?\b`, `agri(culture|cultural)?`, `yield`, `rain[- ]?fed`, `irrigat`, `farming`, `livestock`, `pasture`, `pastoral(ist)?`, `grazing`, `herder`<br>`fish(ery|eries)?`, `aquaculture`, `fishing`, `marine harvest`, `forest(ry)?`, `tree(s)?`, `non[- ]timber`, `terrestrial`, `drylands?`, `ecosystem(s)?`, `ecosystem services?`, `ecological system`<br>`desertification`, `land degradation`, `soil (degradation|erosion)`,
+
+```{r,echo=FALSE}
+# ---- 1) Regex fallbacks for detection --------------------------------------
 hazard_terms <- paste(
   "\\bheat( wave|wave)?\\b","excessive heat","high temperature","extreme (temperature|heat)",
   "cold (wave|spell|snap)","\\bsnow\\b","\\bice\\b","\\bfrost\\b","freeze","severe winter",
@@ -89,6 +116,8 @@ hazard_terms <- paste(
   "pest(s)?","vector-borne","disease(s)?","infestation","invasive species",
   sep="|"
 )
+
+
 
 system_terms <- paste(
   "\\bcrop(s|ping)?\\b","agri(culture|cultural)?","yield","rain[- ]?fed","irrigat","farming",
@@ -109,15 +138,15 @@ system_terms <- paste(
   "\\bhealth\\b","morbidity|mortality","vector[- ]borne|water[- ]borne|infectious|respiratory disease",
   "infrastructure|critical services?","road(s)?|bridge(s)?","electricity|power supply|energy",
   "sanitation|hygiene","education|school(s)?","building|housing|settlement(s)?",
-  "telecom(munication)?","transport","waste management","hydropower","rail(way|ways)","port(s)?","industry","industries","material(s)?",
-  "migration","displacement","conflict","armed conflict","human security","refugee","peace",
+  "telecom(munication)?|transport|waste management|hydropower|rail(way|ways)|port(s)?|industry|industries|material(s)?",
+  "migration|displacement|conflict|armed conflict|human security|refugee|peace",
   sep="|"
 )
 ```
 
 
-```{r}
-# 2) Row-level detection flags ------------------------------------------------
+```{r,echo=FALSE}
+# ---- 2) Row-level detection flags ------------------------------------------
 rows_aug <- rows_aug %>%
   mutate(
     RowHasHazardTerms =
@@ -128,7 +157,8 @@ rows_aug <- rows_aug %>%
       str_detect(txt, regex(system_terms, ignore_case = TRUE))
   )
 
-# 3) Helper for evidence (first triggering row) --------------------------------
+# ---- 3) Document-level linkages (4–10) --------------------------------------
+# Helper to pull first evidence snippet for a logical condition within a selection
 first_snippet <- function(df, cond) {
   hit <- df %>% filter({{ cond }})
   if (nrow(hit) == 0) return(NA_character_)
@@ -141,9 +171,11 @@ first_snippet <- function(df, cond) {
 if (!"Year of Submission" %in% names(rows_aug)) {
   stop("Column 'Year of Submission' not found.")
 }
+```
 
-# 4) Compute ALL linkages (4–13) in one place ---------------------------------
-# 4–10 as before
+
+```{r,echo=FALSE}
+# Compute 0/1 linkages per (Country, Document, Year of Submission)
 linkage_summary_core <- rows_aug %>%
   group_by(Country, Document, `Year of Submission`) %>%
   summarise(
@@ -157,123 +189,66 @@ linkage_summary_core <- rows_aug %>%
     .groups = "drop"
   )
 
-# 11–13 rules (PriorityAction, PriorityResult = co-presence; ActionResult = explicit)
-link_phrases <- paste(
-  "as a result of", "resulted in", "led to", "due to the implementation",
-  "following the implementation", "following (the )?deployment", "because of the implementation",
-  "the action (achieved|led)", "implementation of", "outputs? of (the )?action",
-  "outcomes? of (the )?action", "enabled", "contributed to", "achieved",
-  sep = "|"
-)
-
-linkage_11_13_core <- rows_aug %>%
-  group_by(Country, Document, `Year of Submission`) %>%
-  summarise(
-    PriorityAction = as.integer(any(Element == "Adaptation priorities") & any(Element == "Action")),
-    PriorityResult = as.integer(any(Element == "Adaptation priorities") & any(Element == "Result")),
-    ActionResult = {
-      has_action <- any(Element == "Action")
-      has_result <- any(Element == "Result")
-      if (has_action && has_result) {
-        as.integer(any(str_detect(txt[Element == "Result"], regex(link_phrases, ignore_case = TRUE))))
-      } else {
-        NA_integer_
-      }
-    },
-    .groups = "drop"
-  )
-```
-
-
-```{r}
-# Combine 4–10 with 11–13
-linkage_summary_core <- linkage_summary_core %>%
-  left_join(linkage_11_13_core, by = c("Country","Document","Year of Submission"))
-
-# 5) Evidence for ALL linkages (4–13) -----------------------------------------
+# Build evidence (first triggering row per variable, per doc)
 linkage_evidence <- rows_aug %>%
   group_by(Country, Document, `Year of Submission`) %>%
-  group_modify(~ {
-    prio_rows   <- .x %>% filter(Element == "Adaptation priorities")
-    action_rows <- .x %>% filter(Element == "Action")
-    result_rows <- .x %>% filter(Element == "Result")
-
-    # evidence for 4–10 (first triggering rows)
-    ev4  <- first_snippet(.x %>% filter(Element == "System at risk"),        RowHasHazardTerms)
-    ev5  <- first_snippet(.x %>% filter(Element == "Adaptation priorities"), RowHasHazardTerms)
-    ev6  <- first_snippet(.x %>% filter(Element == "Action"),                RowHasHazardTerms)
-    ev7  <- first_snippet(.x %>% filter(Element == "Result"),                RowHasHazardTerms)
-    ev8  <- first_snippet(.x %>% filter(Element == "Adaptation priorities"), RowHasSystemTerms)
-    ev9  <- first_snippet(.x %>% filter(Element == "Action"),                RowHasSystemTerms)
-    ev10 <- first_snippet(.x %>% filter(Element == "Result"),                RowHasSystemTerms)
-
-    # evidence for 11–13
-    snip_prio   <- if (nrow(prio_rows))   first_snippet(prio_rows,   TRUE) else NA_character_
-    snip_action <- if (nrow(action_rows)) first_snippet(action_rows, TRUE) else NA_character_
-    snip_result <- if (nrow(result_rows)) first_snippet(result_rows, TRUE) else NA_character_
-    res_hits    <- result_rows %>% filter(str_detect(txt, regex(link_phrases, ignore_case = TRUE)))
-    ev13        <- if (nrow(res_hits)) first_snippet(res_hits, TRUE) else NA_character_
-
-    tibble(
-      Variable = c("HazardSystem","HazardPriority","HazardAction","HazardResult",
-                   "SystemPriority","SystemAction","SystemResult",
-                   "PriorityAction","PriorityResult","ActionResult"),
-      Evidence = c(
-        ev4, ev5, ev6, ev7, ev8, ev9, ev10,
-        if (!is.na(snip_prio) && !is.na(snip_action)) paste0(snip_prio, " | ", snip_action) else NA_character_,
-        if (!is.na(snip_prio) && !is.na(snip_result)) paste0(snip_prio, " | ", snip_result) else NA_character_,
-        ev13
-      )
+  group_modify(~ tibble(
+    Variable = c("HazardSystem","HazardPriority","HazardAction","HazardResult",
+                 "SystemPriority","SystemAction","SystemResult"),
+    Evidence = c(
+      first_snippet(.x %>% filter(Element == "System at risk"),        RowHasHazardTerms),
+      first_snippet(.x %>% filter(Element == "Adaptation priorities"), RowHasHazardTerms),
+      first_snippet(.x %>% filter(Element == "Action"),                RowHasHazardTerms),
+      first_snippet(.x %>% filter(Element == "Result"),                RowHasHazardTerms),   # NOT "Indicator"
+      first_snippet(.x %>% filter(Element == "Adaptation priorities"), RowHasSystemTerms),
+      first_snippet(.x %>% filter(Element == "Action"),                RowHasSystemTerms),
+      first_snippet(.x %>% filter(Element == "Result"),                RowHasSystemTerms)    # NOT "Indicator"
     )
-  }) %>% ungroup()
+  )) %>% ungroup()
 
+# Pivot evidence wide & attach to summary
 ev_wide <- linkage_evidence %>%
   mutate(Variable = paste0("Ev_", Variable)) %>%
   pivot_wider(names_from = Variable, values_from = Evidence)
 
-# Final linkage summary (all variables + evidence)
 linkage_summary <- linkage_summary_core %>%
   left_join(ev_wide, by = c("Country","Document","Year of Submission"))
 ```
 
 
-```{r}
-# 6) Merge ALL linkages back into adaptdata (row-scoped) ----------------------
-# 4–10: keep flags on their target element rows
-# 11–13: populate on relevant rows:
-#   - PriorityAction on Adaptation priorities & Action rows
-#   - PriorityResult on Adaptation priorities & Result rows
-#   - ActionResult   on Action & Result rows
+```{r,echo=FALSE}
+# ---- 4) Merge the 0/1 flags back into adaptdata (row-scoped) ----------------
+# - On "Hazard" rows: keep Hazard* flags; else NA
+# - On "System at risk" rows: keep System* flags; else NA
 adaptdata <- adaptdata %>%
   left_join(linkage_summary_core, by = c("Country","Document","Year of Submission")) %>%
   mutate(
     HazardSystem   = ifelse(Element == "System at risk",         HazardSystem,   NA_integer_),
-    HazardPriority = ifelse(Element == "Adaptation priorities",  HazardPriority, NA_integer_),
-    HazardAction   = ifelse(Element == "Action",                  HazardAction,   NA_integer_),
-    HazardResult   = ifelse(Element == "Result",                  HazardResult,   NA_integer_),
+    HazardPriority = ifelse(Element == "Adaptation priorities",         HazardPriority, NA_integer_),
+    HazardAction   = ifelse(Element == "Action",         HazardAction,   NA_integer_),
+    HazardResult   = ifelse(Element == "Result",         HazardResult,   NA_integer_),
 
-    SystemPriority = ifelse(Element == "Adaptation priorities",  SystemPriority, NA_integer_),
-    SystemAction   = ifelse(Element == "Action",                  SystemAction,   NA_integer_),
-    SystemResult   = ifelse(Element == "Result",                  SystemResult,   NA_integer_),
-
-    PriorityAction = ifelse(Element %in% c("Adaptation priorities","Action"), PriorityAction, NA_integer_),
-    PriorityResult = ifelse(Element %in% c("Adaptation priorities","Result"), PriorityResult, NA_integer_),
-    ActionResult   = ifelse(Element %in% c("Action","Result"),                 ActionResult,   NA_integer_)
+    SystemPriority = ifelse(Element == "Adaptation priorities", SystemPriority, NA_integer_),
+    SystemAction   = ifelse(Element == "Action", SystemAction,   NA_integer_),
+    SystemResult   = ifelse(Element == "Result", SystemResult,   NA_integer_)
   )
 ```
 
 
-```{r}
-# 7) Analytics (countries & linkage types) ------------------------------------
-# For original 7 (4–10)
+```{r,echo=FALSE}
+# --- Linkage analytics: countries with most links + most common linkage types ---
+
+# The seven binary linkage variables in `linkage_summary`
 linkage_vars <- c(
   "HazardSystem","HazardPriority","HazardAction","HazardResult",
   "SystemPriority","SystemAction","SystemResult"
 )
 
+# Per-document totals (treat NA as 0)
 by_doc <- linkage_summary %>%
   mutate(TotalLinks = rowSums(across(all_of(linkage_vars)), na.rm = TRUE))
 
+# 1) Countries with the most linkages
 by_country_links <- by_doc %>%
   group_by(Country) %>%
   summarise(
@@ -283,77 +258,118 @@ by_country_links <- by_doc %>%
   ) %>%
   arrange(desc(TotalLinks), Country)
 
+# 2) Linkage types most frequent across all documents
 n_docs <- nrow(linkage_summary)
 
 by_type_links <- linkage_summary %>%
   summarise(across(all_of(linkage_vars), ~ sum(. == 1, na.rm = TRUE))) %>%
   pivot_longer(everything(), names_to = "Linkage", values_to = "DocsWithLink") %>%
-  mutate(ShareOfDocs = round(100 * DocsWithLink / n_docs, 1)) %>%
+  mutate(
+    ShareOfDocs = round(100 * DocsWithLink / n_docs, 1)  ) %>%
   arrange(desc(DocsWithLink), Linkage)
+```
 
-# Extended analytics including 11–13
-extended_vars <- c(linkage_vars, "PriorityAction","PriorityResult","ActionResult")
 
-by_doc_all <- linkage_summary %>%
-  mutate(TotalLinks_All = rowSums(across(all_of(extended_vars)), na.rm = TRUE))
+```{r,echo=FALSE}
+# Pretty tables
 
-by_country_links_all <- by_doc_all %>%
-  group_by(Country) %>%
-  summarise(
-    Docs = n(),
-    TotalLinks_All = sum(TotalLinks_All),
-    .groups = "drop"
+# Minimal, compact DT with truncated ElementText + hover
+library(DT)
+library(dplyr)
+library(htmltools)
+
+# how many characters to show
+n <- 140
+
+small_df <- adaptdata %>%
+  mutate(
+    `ElementText (hover)` = ifelse(
+      is.na(ElementText) | ElementText == "", "",
+      sprintf(
+        "<div title='%s' style='white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:420px;'>%s%s</div>",
+        htmlEscape(ElementText, attribute = TRUE),
+        htmlEscape(substr(ElementText, 1, n)),
+        ifelse(nchar(ElementText) > n, "…", "")
+      )
+    )
   ) %>%
-  arrange(desc(TotalLinks_All), Country)
+  select(Country, Document, `Year of Submission`, Element,
+         HazardType, SystemType, SectorType_GGA,
+         `ElementText (hover)`,
+         everything(), -ElementText)
+```
 
-by_type_links_all <- linkage_summary %>%
-  summarise(across(all_of(extended_vars), ~ sum(. == 1, na.rm = TRUE))) %>%
-  pivot_longer(everything(), names_to = "Linkage", values_to = "DocsWithLink") %>%
-  mutate(ShareOfDocs = round(100 * DocsWithLink / n_docs, 1)) %>%
-  arrange(desc(DocsWithLink), Linkage)
+### Raw data table
+```{r,echo=TRUE}
+datatable(
+  small_df,
+  escape = FALSE,
+  class = "compact stripe hover",
+  options = list(
+    pageLength = 15,
+    scrollX = TRUE,
+    dom = "tip"
+  ),
+  caption = "📄 Full linkages data (hover ElementText to see full text)"
+)
 ```
 
 
-```{r}
-# 8) Display (DT if available) -------------------------------------------------
+```{r,echo=FALSE}
+# characters to show before ellipsis
+n <- 140
 
-  DT::datatable(
-    by_country_links,
-    options = list(pageLength = 15, autoWidth = TRUE, dom = 'tip'),
-    caption = "🏆 Countries with Most Linkages (7 variables: 4–10)"
-  )
+# copy and compact the Ev_* columns
+sum_df <- linkage_summary
+ev_cols <- grep("^Ev_", names(sum_df), value = TRUE)
 
-  DT::datatable(
-    by_type_links,
-    options = list(pageLength = 10, autoWidth = TRUE, dom = 'tip'),
-    caption = "📊 Linkage Types by Frequency (7 variables: 4–10)"
+for (col in ev_cols) {
+  txt <- sum_df[[col]]
+  sum_df[[col]] <- ifelse(
+    is.na(txt) | txt == "", "",
+    sprintf(
+      "<div title='%s' style='white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:480px;'>%s%s</div>",
+      htmlEscape(txt, attribute = TRUE),
+      htmlEscape(substr(txt, 1, n)),
+      ifelse(nchar(txt) > n, "…", "")
+    )
   )
-  
-  DT::datatable(
-    by_country_links_all,
-    options = list(pageLength = 15, autoWidth = TRUE, dom = 'tip'),
-    caption = "🏆 Countries with Most Linkages (Extended: 4–13)"
-  )
-  
-  DT::datatable(
-    by_type_links_all,
-    options = list(pageLength = 10, autoWidth = TRUE, dom = 'tip'),
-    caption = "📊 Linkage Types by Frequency (Extended: 4–13)"
-  )
+}
+```
+
+### Linkages summary data 
+
+```{r,echo=TRUE}
+# (optional) push evidence columns to the end
+# sum_df <- dplyr::relocate(sum_df, dplyr::any_of(ev_cols), .after = dplyr::last_col())
+
+datatable(
+  sum_df,
+  escape = FALSE,                  # render HTML for tooltips
+  class  = "compact stripe hover", # tighter rows
+  options = list(
+    pageLength = 15,
+    scrollX = TRUE,
+    dom = "tip"
+  ),
+  caption = "🏆 Linkages summary (hover Ev_* cells to see full evidence)"
+)
+
+
+DT::datatable(
+  by_country_links,
+  options = list(pageLength = 15, autoWidth = TRUE, dom = 'tip'),
+  caption = "🏆 Countries with Most Linkages (sum across documents)"
+)
+
+DT::datatable(
+  by_type_links,
+  options = list(pageLength = 10, autoWidth = TRUE, dom = 'tip'),
+  caption = "📊 Linkage Types by Frequency Across All Documents"
+)
 
 ```
 
-
-```{r}
-# 9) (Optional) Save outputs (commented to match your pattern) -----------------
-# write.csv(linkage_summary,        "LinkageSummary_withEvidence.csv", row.names = FALSE)
-# write.csv(linkage_evidence,       "LinkageEvidence_long_4to13.csv", row.names = FALSE)
-# write.csv(adaptdata,              "AdaptationElements_withAllLinkages.csv", row.names = FALSE)
-# write.csv(by_country_links,       "Linkage_Countries_Totals_7vars.csv", row.names = FALSE)
-# write.csv(by_type_links,          "Linkage_Types_Frequency_7vars.csv", row.names = FALSE)
-# write.csv(by_country_links_all,   "Linkage_Countries_Totals_10vars.csv", row.names = FALSE)
-# write.csv(by_type_links_all,      "Linkage_Types_Frequency_10vars.csv", row.names = FALSE)
-```
 
 
 ```{r}
@@ -364,4 +380,453 @@ by_type_links_all <- linkage_summary %>%
 
 
 ```
+
+## Remarks on Priorities ↔ Actions ↔ Results Linkages
+
+We currently lack robust, curated **keywords** to infer semantic links between *Adaptation priorities*, *Action*, and *Result* elements. There are two defensible ways to operationalize these linkages:
+
+### Option A — Co-presence (simple, transparent)
+Treat linkages as **present** if the two elements both appear anywhere in the same document.
+
+- **PriorityAction** = 1 if the document contains *Adaptation priorities* **and** *Action*.
+- **PriorityResult** = 1 if the document contains *Adaptation priorities* **and** *Result* (excluding *Indicator*).
+- **ActionResult** = 1 **only if** we find an explicit linking phrase in a *Result* (e.g., “led to”, “as a result of…”, “following the implementation…”).  
+  *Rationale:* emphasize reporting progress for pre-identified priorities/actions, so co-presence is a reasonable, low-assumption proxy; but for Action→Result we still want a minimal causal signal.
+
+**Pros:** Easiest to explain; stable across languages; low risk of over-engineering.  
+**Cons:** Overestimates linkage strength when sections are listed but not actually connected.
+
+### Option B — “Strict” evidence (conservative, higher precision)
+Require **alignment cues** between the two elements before flagging a linkage:
+
+- **Shared tags:** overlapping **SystemType** or **HazardType** between the two elements.
+- **Linking phrases:** phrases indicating implementation or tracking against priorities (e.g., “to implement the priority…”, “progress toward the priority…”) or that results arose **from** actions (e.g., “led to”, “as a result of…”).
+
+**Pros:** Reduces false positives; closer to the spirit of “coherence.”  
+**Cons:** Sensitive to tagging gaps and language variations; may undercount true links.
+
+### Comparing practice
+
+```{r,echo=FALSE}
+# ============================================================
+# Q11–Q13 Linkages (create from scratch) + Co-presence vs STRICT + Comparison
+# Assumes `adaptdata`, `rows_aug`, and `linkage_summary` from earlier steps exist.
+# If `rows_aug` does not exist, we recreate the minimal version needed.
+# ============================================================
+
+# --- Ensure rows_aug exists (minimal recreation if needed) --------------------
+if (!exists("rows_aug")) {
+  rows_aug <- adaptdata %>%
+    dplyr::mutate(
+      ElementText   = ifelse(is.na(ElementText), "", ElementText),
+      txt           = tolower(ElementText)
+    )
+}
+
+# --- Helper: concise snippet from first matching row -------------------------
+first_snip <- function(df) {
+  if (nrow(df) == 0) return(NA_character_)
+  s <- substr(df$ElementText[1], 1, 200)
+  s <- gsub("\\s+", " ", s)
+  paste0("[", df$EntryID[1], " • ", df$Element[1], "] ", s,
+         ifelse(nchar(df$ElementText[1]) > 200, "…", ""))
+}
+
+# --- Linking phrases for Results referencing Actions (multilingual) ----------
+rx_action_result <- stringr::regex(paste(
+  # EN
+  "led to", "resulted in", "as a result", "following the implementation",
+  "after implementation", "due to the implementation", "because of the action",
+  "contributed to", "enabled", "achieved through", "following the adoption",
+  # FR
+  "a conduit à", "a mené à", "a abouti à", "à la suite de", "suite à la mise en œuvre",
+  "grâce à", "du fait de", "en raison de", "a permis de",
+  # ES
+  "dio lugar a", "condujo a", "resultó en", "como resultado",
+  "a raíz de la implementación", "debido a la implementación",
+  "gracias a", "permitió", "logrado mediante", "tras la implementación"
+, sep = "|"), ignore_case = TRUE)
+
+# --- Phrases that tie Actions/Results back to Priorities (optional support) ---
+rx_priority_ref <- stringr::regex(paste(
+  # EN
+  "priority|priorities|strategic objective|goal",
+  # FR
+  "priorité(s)?|objectif(s)? stratégique(s)?",
+  # ES
+  "prioridad(es)?|objetivo(s)? estratégico(s)?"
+, sep = "|"), ignore_case = TRUE)
+```
+
+
+```{r,echo=FALSE}
+# --- Build Q11–Q13 per document ---------------------------------------------
+q11_13 <- rows_aug %>%
+  dplyr::group_by(Country, Document, `Year of Submission`) %>%
+  dplyr::group_modify(~{
+    doc <- .x
+
+    # Presence of elements
+    has_pri <- any(doc$Element == "Adaptation priorities")
+    has_act <- any(doc$Element == "Action")
+    # Result only (Indicator excluded)
+    has_res <- any(doc$Element == "Result")
+
+    # --- Co-presence rules (simple) ---
+    PriorityAction  <- dplyr::if_else((has_pri | has_act),
+                                      as.integer(has_pri & has_act), NA_integer_)
+    PriorityResult  <- dplyr::if_else((has_pri | has_res),
+                                      as.integer(has_pri & has_res), NA_integer_)
+    ActionResult    <- dplyr::if_else((has_act | has_res),
+                                      as.integer(has_act & has_res), NA_integer_)
+
+    # Evidence (co-presence): show first snippet of each relevant element, joined by " | "
+    ev_pa <- if (isTRUE(PriorityAction == 1)) {
+      paste(
+        first_snip(doc %>% dplyr::filter(Element == "Adaptation priorities")),
+        first_snip(doc %>% dplyr::filter(Element == "Action")),
+        sep = " | "
+      )
+    } else NA_character_
+
+    ev_pr <- if (isTRUE(PriorityResult == 1)) {
+      paste(
+        first_snip(doc %>% dplyr::filter(Element == "Adaptation priorities")),
+        first_snip(doc %>% dplyr::filter(Element == "Result")),
+        sep = " | "
+      )
+    } else NA_character_
+
+    ev_ar <- if (isTRUE(ActionResult == 1)) {
+      paste(
+        first_snip(doc %>% dplyr::filter(Element == "Action")),
+        first_snip(doc %>% dplyr::filter(Element == "Result")),
+        sep = " | "
+      )
+    } else NA_character_
+
+    # --- STRICT rules --------------------------------------------------------
+    # Use sector overlap as a conservative alignment proxy + (for ActionResult) a linking phrase in Result.
+    get_sectors <- function(d, elem) {
+      secs <- d %>%
+        dplyr::filter(Element == elem) %>%
+        dplyr::pull(SectorType_GGA)
+      secs <- secs[!is.na(secs) & secs != ""]
+      unique(secs)
+    }
+
+    secP <- get_sectors(doc, "Adaptation priorities")
+    secA <- get_sectors(doc, "Action")
+    secR <- get_sectors(doc, "Result")
+
+    # sector overlaps
+    ovl_PA <- length(intersect(secP, secA)) > 0
+    ovl_PR <- length(intersect(secP, secR)) > 0
+    ovl_AR <- length(intersect(secA, secR)) > 0
+
+    # phrase signals
+    res_text <- tolower(paste(doc$ElementText[doc$Element == "Result"], collapse = " || "))
+    act_text <- tolower(paste(doc$ElementText[doc$Element == "Action"],  collapse = " || "))
+    pri_text <- tolower(paste(doc$ElementText[doc$Element == "Adaptation priorities"], collapse = " || "))
+
+    res_links_action <- stringr::str_detect(res_text, rx_action_result)
+    act_refs_priority <- stringr::str_detect(act_text, rx_priority_ref)
+    res_refs_priority <- stringr::str_detect(res_text, rx_priority_ref)
+
+    # STRICT decisions
+    PriorityAction_strict <- dplyr::if_else(
+      (has_pri | has_act),
+      as.integer(has_pri & has_act & (ovl_PA | act_refs_priority)),
+      NA_integer_
+    )
+
+    PriorityResult_strict <- dplyr::if_else(
+      (has_pri | has_res),
+      as.integer(has_pri & has_res & (ovl_PR | res_refs_priority)),
+      NA_integer_
+    )
+
+    ActionResult_strict <- dplyr::if_else(
+      (has_act | has_res),
+      as.integer(has_act & has_res & ovl_AR & res_links_action),
+      NA_integer_
+    )
+
+    # STRICT evidence
+    ev_pa_s <- if (isTRUE(PriorityAction_strict == 1)) {
+      paste(
+        first_snip(doc %>% dplyr::filter(Element == "Adaptation priorities")),
+        first_snip(doc %>% dplyr::filter(Element == "Action")),
+        sep = " | "
+      )
+    } else NA_character_
+
+    ev_pr_s <- if (isTRUE(PriorityResult_strict == 1)) {
+      paste(
+        first_snip(doc %>% dplyr::filter(Element == "Adaptation priorities")),
+        first_snip(doc %>% dplyr::filter(Element == "Result")),
+        sep = " | "
+      )
+    } else NA_character_
+
+    ev_ar_s <- if (isTRUE(ActionResult_strict == 1)) {
+      # Prefer a Result row that actually contains a linking phrase
+      res_rows <- doc %>% dplyr::filter(Element == "Result")
+      res_hit  <- res_rows %>% dplyr::filter(stringr::str_detect(tolower(ElementText), rx_action_result))
+      res_pick <- if (nrow(res_hit)) res_hit else res_rows
+
+      paste(
+        first_snip(doc %>% dplyr::filter(Element == "Action")),
+        first_snip(res_pick),
+        sep = " | "
+      )
+    } else NA_character_
+
+    tibble::tibble(
+      PriorityAction = PriorityAction,
+      PriorityResult = PriorityResult,
+      ActionResult   = ActionResult,
+      Ev_PriorityAction = ev_pa,
+      Ev_PriorityResult = ev_pr,
+      Ev_ActionResult   = ev_ar,
+
+      PriorityAction_strict = PriorityAction_strict,
+      PriorityResult_strict = PriorityResult_strict,
+      ActionResult_strict   = ActionResult_strict,
+      Ev_PriorityAction_strict = ev_pa_s,
+      Ev_PriorityResult_strict = ev_pr_s,
+      Ev_ActionResult_strict   = ev_ar_s,
+
+      # Optional diagnostics (counts) – can be useful to debug borderline cases
+      n_priorities = sum(doc$Element == "Adaptation priorities"),
+      n_actions    = sum(doc$Element == "Action"),
+      n_results    = sum(doc$Element == "Result"),
+      secP = paste(secP, collapse = "; "),
+      secA = paste(secA, collapse = "; "),
+      secR = paste(secR, collapse = "; ")
+    )
+  }) %>%
+  dplyr::ungroup()
+
+# --- Attach Q11–Q13 to linkage_summary ---------------------------------------
+if (!exists("linkage_summary")) {
+  # if earlier summary doesn't exist, create a minimal one with keys
+  linkage_summary <- rows_aug %>%
+    dplyr::distinct(Country, Document, `Year of Submission`)
+}
+
+linkage_summary <- linkage_summary %>%
+  dplyr::left_join(q11_13, by = c("Country","Document","Year of Submission"))
+```
+
+
+```{r,echo=FALSE}
+# --- Push Q11–Q13 flags back into adaptdata (row-scoped) ---------------------
+# Fill on the relevant element rows; NA elsewhere (to keep tables readable)
+adaptdata2 <- adaptdata %>%
+  dplyr::left_join(
+    q11_13 %>% dplyr::select(Country, Document, `Year of Submission`,
+                             PriorityAction, PriorityResult, ActionResult,
+                             PriorityAction_strict, PriorityResult_strict, ActionResult_strict),
+    by = c("Country","Document","Year of Submission")
+  ) %>%
+  dplyr::mutate(
+    PriorityAction         = ifelse(Element %in% c("Adaptation priorities","Action"), PriorityAction, NA_integer_),
+    PriorityResult         = ifelse(Element %in% c("Adaptation priorities","Result"), PriorityResult, NA_integer_),
+    ActionResult           = ifelse(Element %in% c("Action","Result"), ActionResult, NA_integer_),
+
+    PriorityAction_strict  = ifelse(Element %in% c("Adaptation priorities","Action"), PriorityAction_strict, NA_integer_),
+    PriorityResult_strict  = ifelse(Element %in% c("Adaptation priorities","Result"), PriorityResult_strict, NA_integer_),
+    ActionResult_strict    = ifelse(Element %in% c("Action","Result"), ActionResult_strict, NA_integer_)
+  )
+
+# --- Comparison tables (Co-presence vs STRICT) --------------------------------
+cmp_specs <- tibble::tribble(
+  ~var,               ~var_strict,              ~label,
+  "PriorityAction",   "PriorityAction_strict",  "PriorityAction",
+  "PriorityResult",   "PriorityResult_strict",  "PriorityResult",
+  "ActionResult",     "ActionResult_strict",    "ActionResult"
+)
+
+overall_cmp <- cmp_specs %>%
+  dplyr::rowwise() %>%
+  dplyr::mutate(
+    co_1      = sum(linkage_summary[[var]] == 1, na.rm = TRUE),
+    strict_1  = sum(linkage_summary[[var_strict]] == 1, na.rm = TRUE),
+    docs_with_valid = sum(!is.na(linkage_summary[[var]]) | !is.na(linkage_summary[[var_strict]])),
+    co_share      = round(100 * co_1 / docs_with_valid, 1),
+    strict_share  = round(100 * strict_1 / docs_with_valid, 1),
+    delta_docs    = co_1 - strict_1,
+    delta_pp      = round(co_share - strict_share, 1)
+  ) %>%
+  dplyr::ungroup() %>%
+  dplyr::select(Linkage = label, DocsWithLink_Co = co_1, DocsWithLink_Strict = strict_1,
+                Share_Co_pct = co_share, Share_Strict_pct = strict_share,
+                Delta_Docs = delta_docs, Delta_pp = delta_pp)
+
+
+```
+
+
+```{r,echo=TRUE}
+# Overall comparison
+  DT::datatable(
+    overall_cmp,
+    class = "compact stripe hover",
+    options = list(pageLength = 10, dom = "tip"),
+    caption = "📊 Q11–Q13: Co-presence vs STRICT — overall comparison"
+  )
+```
+This table compares two ways of detecting linkages among **Adaptation priorities → Actions → Results** across documents:
+
+- **Co-presence** (simple): flags a linkage when the two relevant elements both appear somewhere in the same document.  
+- **STRICT** (conservative): requires **alignment cues** between the two elements (e.g., shared sector tags and/or reference phrases). For **Action→Result**, STRICT also requires an **explicit linking phrase** in a Result (e.g., *“led to”*, *“as a result of”*). *Indicators are excluded from Results.*
+
+Columns
+
+- **Linkage** — The linkage being assessed:  
+  - *PriorityAction* (Q11): Adaptation priorities ↔ Actions  
+  - *PriorityResult* (Q12): Adaptation priorities ↔ Results  
+  - *ActionResult* (Q13): Actions ↔ Results
+- **DocsWithLink_Co** — Number of documents where the linkage is present under the **Co-presence** rule.
+- **DocsWithLink_Strict** — Number of documents where the linkage is present under the **STRICT** rule.
+- **Share_Co_pct / Share_Strict_pct** — Percent of (eligible) documents with the linkage under each rule. The denominator is the count of documents where the linkage could be evaluated (i.e., at least one of the two elements exists; rows where both elements are absent are excluded and appear as **NA**).
+- **Delta_Docs** — Difference in counts: `DocsWithLink_Co − DocsWithLink_Strict`.
+- **Delta_pp** — Difference in percentage points: `Share_Co_pct − Share_Strict_pct`.
+
+ Interpreting gaps
+ 
+- Large positive **Delta_pp** means many documents **list** both sections but **lack explicit alignment** (STRICT evidence).  
+- Smaller gaps suggest stronger coherence (elements appear together **and** show alignment signals).
+
+
+```{r,echo=FALSE}
+# Per-country comparison
+  # --- 2) Per-country comparison (FIXED: no do()/rowwise() scoping issues) ---
+country_cmp <- dplyr::bind_rows(lapply(seq_len(nrow(cmp_specs)), function(i) {
+  var        <- cmp_specs$var[i]
+  var_strict <- cmp_specs$var_strict[i]
+  lab        <- cmp_specs$label[i]
+
+  linkage_summary %>%
+    dplyr::group_by(Country) %>%
+    dplyr::summarise(
+      Docs   = dplyr::n(),
+      Co     = sum(.data[[var]] == 1, na.rm = TRUE),
+      Strict = sum(.data[[var_strict]] == 1, na.rm = TRUE),
+      Delta  = Co - Strict,
+      .groups = "drop"
+    ) %>%
+    dplyr::mutate(Linkage = lab)
+})) %>%
+  dplyr::relocate(Linkage, .before = Country) %>%
+  dplyr::arrange(Linkage, dplyr::desc(Delta), dplyr::desc(Co))
+
+DT::datatable(
+    country_cmp,
+    class = "compact stripe hover",
+    options = list(pageLength = 15, scrollX = TRUE, dom = "tip"),
+    caption = "🌍 Q11–Q13 by country: documents with links (Co-presence vs STRICT)"
+  )
+
+```
+
+This table aggregates linkage detection **by country** across documents (distinct combinations of *Country × Document × Year of Submission*).
+
+Columns
+
+- **Linkage** — The linkage assessed:
+  - *PriorityAction* (Q11): Adaptation priorities ↔ Actions  
+  - *PriorityResult* (Q12): Adaptation priorities ↔ Results (*Indicators excluded*)  
+  - *ActionResult* (Q13): Actions ↔ Results
+- **Country** — Reporting Party.
+- **Docs** — Number of documents evaluated for that country (count of distinct *Country–Document–Year* rows).
+- **Co** — How many of those documents show the linkage under the **Co-presence** rule (elements both appear somewhere in the doc).
+- **Strict** — How many documents show the linkage under the **STRICT** rule (requires alignment cues; for Action→Result also an explicit linking phrase).
+- **Delta** — `Co − Strict` (how many documents lose the linkage when stricter evidence is required).
+
+Interpreting the counts
+
+- A **large positive Delta** suggests the country often lists both elements but **does not** consistently show explicit alignment (e.g., actions/results not clearly tied to priorities, or results not clearly attributed to actions).
+- A **small Delta** indicates stronger coherence or more explicit reporting.
+
+
+```{r,echo=FALSE}
+# Document-level differences where Co ≠ STRICT
+  build_diff <- function(var) {
+    v_co  <- var
+    v_st  <- paste0(var, "_strict")
+    ev_co <- paste0("Ev_", var)
+    ev_st <- paste0("Ev_", v_st)
+    linkage_summary %>%
+      dplyr::transmute(
+        Country, Document, `Year of Submission`,
+        Variable = var,
+        Co      = .data[[v_co]],
+        Strict  = .data[[v_st]],
+        Ev_Co   = .data[[ev_co]],
+        Ev_Strict = .data[[ev_st]]
+      ) %>%
+      dplyr::filter(!(is.na(Co) & is.na(Strict))) %>%
+      dplyr::filter(Co != Strict | (is.na(Co) != is.na(Strict)))
+  }
+
+  doc_diff <- dplyr::bind_rows(
+    build_diff("PriorityAction"),
+    build_diff("PriorityResult"),
+    build_diff("ActionResult")
+  )
+
+  truncate_html <- function(x, n = 140, maxw = 520) {
+    ifelse(
+      is.na(x) | x == "", "",
+      sprintf(
+        "<div title='%s' style='white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:%dpx;'>%s%s</div>",
+        htmltools::htmlEscape(x, attribute = TRUE),
+        maxw,
+        htmltools::htmlEscape(substr(x, 1, n)),
+        ifelse(nchar(x) > n, "…", "")
+      )
+    )
+  }
+
+  doc_diff_disp <- doc_diff %>%
+    dplyr::mutate(
+      `Ev (Co-presence)` = truncate_html(Ev_Co),
+      `Ev (STRICT)`      = truncate_html(Ev_Strict)
+    ) %>%
+    dplyr::select(Country, Document, `Year of Submission`, Variable, Co, Strict,
+                  `Ev (Co-presence)`, `Ev (STRICT)`)
+  
+  DT::datatable(
+    doc_diff_disp,
+    escape = FALSE,
+    class = "compact stripe hover",
+    options = list(pageLength = 20, scrollX = TRUE, dom = "tip"),
+    caption = "🧪 Docs where Co-presence ≠ STRICT (hover evidence to review)"
+  )
+
+
+```
+This table lists **only** the documents where the two linkage modes disagree for Q11–Q13:
+
+- **Co-presence** = linkage flagged when both elements appear somewhere in the document.
+- **STRICT** = linkage flagged **only** when alignment is evidenced (shared tags and/or reference phrases; for Action→Result an explicit linking phrase in a *Result*).
+
+Columns
+
+- **Country / Document / Year of Submission** — Document identifier.
+- **Variable** — Which linkage is being compared:
+  - *PriorityAction* (Q11), *PriorityResult* (Q12), *ActionResult* (Q13).
+- **Co / Strict** — Binary flags (1/0) under each rule for this document–linkage pair.
+- **Ev (Co-presence)** — First supporting snippet used to justify **Co-presence** (hover to see the full text). Format:  
+  `"[EntryID • Element] excerpt…"`
+- **Ev (STRICT)** — First supporting snippet used to justify **STRICT** (hover to see the full text). If empty, no qualifying alignment cue was found.
+
+Interpreting rows
+
+- **Co = 1, Strict = 0** → Elements are listed, but we did **not** detect explicit alignment (e.g., no sector overlap or linking phrase).  
+  *Actionable next step:* inspect **Ev (Co-presence)**, then search the source for a clearer tie.
+- **Co = 0, Strict = 1** → Should **not** occur (STRICT is a subset of Co-presence). If observed, check data/tagging.
+
 
