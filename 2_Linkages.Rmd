@@ -20,7 +20,7 @@ Each row is tagged by *Element* (e.g., *System at risk*, *Adaptation priorities*
 
 For every document (**Country × Document × Year of Submission**), we compute seven binary variables by scanning the **appropriate target element** for the required mentions:
 
-- **HazardSystem** → hazard terms in *System at risk*  
+- **HazardSystem** → EITHER hazard terms in *System at risk* OR system terms in *Hazard*
 - **HazardPriority** → hazard terms in *Adaptation priorities*  
 - **HazardAction** → hazard terms in *Action*  
 - **HazardResult** → hazard terms in *Result*  
@@ -147,15 +147,23 @@ system_terms <- paste(
 
 ```{r,echo=FALSE}
 # ---- 2) Row-level detection flags ------------------------------------------
+system_elements <- c("System at risk")
+hazard_elements <- c("Hazard")
+
 rows_aug <- rows_aug %>%
   mutate(
-    RowHasHazardTerms =
-      has_hazard_tag |
-      str_detect(txt, regex(hazard_terms, ignore_case = TRUE)),
-    RowHasSystemTerms =
-      has_system_tag |
-      str_detect(txt, regex(system_terms, ignore_case = TRUE))
+    RowHasHazardTerms = has_hazard_tag | str_detect(txt, regex(hazard_terms, ignore_case = TRUE)),
+    RowHasSystemTerms = has_system_tag  | str_detect(txt, regex(system_terms,  ignore_case = TRUE)),
+
+    # NEW: explicit cross-hit row flags
+    RowHasHazardInSystem = RowHasHazardTerms & Element %in% system_elements,
+    RowHasSystemInHazard = RowHasSystemTerms & Element %in% hazard_elements
   )
+
+if (!"Year of Submission" %in% names(rows_aug)) {
+  stop("Column 'Year of Submission' not found.")
+}
+
 
 # ---- 3) Document-level linkages (4–10) --------------------------------------
 # Helper to pull first evidence snippet for a logical condition within a selection
@@ -168,8 +176,9 @@ first_snippet <- function(df, cond) {
          ifelse(nchar(hit$ElementText[1]) > 200, "…", ""))
 }
 
-if (!"Year of Submission" %in% names(rows_aug)) {
-  stop("Column 'Year of Submission' not found.")
+first_non_na <- function(...) {
+  for (x in list(...)) if (is.character(x) && length(x) == 1 && !is.na(x) && nzchar(x)) return(x)
+  NA_character_
 }
 ```
 
@@ -179,37 +188,48 @@ if (!"Year of Submission" %in% names(rows_aug)) {
 linkage_summary_core <- rows_aug %>%
   group_by(Country, Document, `Year of Submission`) %>%
   summarise(
-    HazardSystem   = as.integer(any(RowHasHazardTerms[Element == "System at risk"], na.rm = TRUE)),
+    # CHANGED: either hazard-in-system OR system-in-hazard
+    HazardSystem   = as.integer(
+      any(RowHasHazardInSystem, na.rm = TRUE) | any(RowHasSystemInHazard, na.rm = TRUE)
+    ),
     HazardPriority = as.integer(any(RowHasHazardTerms[Element == "Adaptation priorities"], na.rm = TRUE)),
     HazardAction   = as.integer(any(RowHasHazardTerms[Element == "Action"], na.rm = TRUE)),
-    HazardResult   = as.integer(any(RowHasHazardTerms[Element == "Result"], na.rm = TRUE)),   # NOT "Indicator"
+    HazardResult   = as.integer(any(RowHasHazardTerms[Element == "Result"], na.rm = TRUE)),
     SystemPriority = as.integer(any(RowHasSystemTerms[Element == "Adaptation priorities"], na.rm = TRUE)),
     SystemAction   = as.integer(any(RowHasSystemTerms[Element == "Action"], na.rm = TRUE)),
-    SystemResult   = as.integer(any(RowHasSystemTerms[Element == "Result"], na.rm = TRUE)),   # NOT "Indicator"
+    SystemResult   = as.integer(any(RowHasSystemTerms[Element == "Result"], na.rm = TRUE)),
     .groups = "drop"
   )
+
 
 # Build evidence (first triggering row per variable, per doc)
 linkage_evidence <- rows_aug %>%
   group_by(Country, Document, `Year of Submission`) %>%
-  group_modify(~ tibble(
-    Variable = c("HazardSystem","HazardPriority","HazardAction","HazardResult",
-                 "SystemPriority","SystemAction","SystemResult"),
-    Evidence = c(
-      first_snippet(.x %>% filter(Element == "System at risk"),        RowHasHazardTerms),
-      first_snippet(.x %>% filter(Element == "Adaptation priorities"), RowHasHazardTerms),
-      first_snippet(.x %>% filter(Element == "Action"),                RowHasHazardTerms),
-      first_snippet(.x %>% filter(Element == "Result"),                RowHasHazardTerms),   # NOT "Indicator"
-      first_snippet(.x %>% filter(Element == "Adaptation priorities"), RowHasSystemTerms),
-      first_snippet(.x %>% filter(Element == "Action"),                RowHasSystemTerms),
-      first_snippet(.x %>% filter(Element == "Result"),                RowHasSystemTerms)    # NOT "Indicator"
+  group_modify(~ {
+    evidence_hs <- first_non_na(
+      # hazard term inside System section
+      first_snippet(.x %>% filter(Element %in% system_elements), RowHasHazardTerms),
+      # system term inside Hazard section
+      first_snippet(.x %>% filter(Element %in% hazard_elements), RowHasSystemTerms)
     )
-  )) %>% ungroup()
+    tibble(
+      Variable = c("HazardSystem","HazardPriority","HazardAction","HazardResult",
+                   "SystemPriority","SystemAction","SystemResult"),
+      Evidence = c(
+        evidence_hs,
+        first_snippet(.x %>% filter(Element == "Adaptation priorities"), RowHasHazardTerms),
+        first_snippet(.x %>% filter(Element == "Action"),                RowHasHazardTerms),
+        first_snippet(.x %>% filter(Element == "Result"),                RowHasHazardTerms),
+        first_snippet(.x %>% filter(Element == "Adaptation priorities"), RowHasSystemTerms),
+        first_snippet(.x %>% filter(Element == "Action"),                RowHasSystemTerms),
+        first_snippet(.x %>% filter(Element == "Result"),                RowHasSystemTerms)
+      )
+    )
+  }) %>% ungroup()
 
-# Pivot evidence wide & attach to summary
 ev_wide <- linkage_evidence %>%
   mutate(Variable = paste0("Ev_", Variable)) %>%
-  pivot_wider(names_from = Variable, values_from = Evidence)
+  tidyr::pivot_wider(names_from = Variable, values_from = Evidence)
 
 linkage_summary <- linkage_summary_core %>%
   left_join(ev_wide, by = c("Country","Document","Year of Submission"))
@@ -223,15 +243,15 @@ linkage_summary <- linkage_summary_core %>%
 adaptdata <- adaptdata %>%
   left_join(linkage_summary_core, by = c("Country","Document","Year of Submission")) %>%
   mutate(
-    HazardSystem   = ifelse(Element == "System at risk",         HazardSystem,   NA_integer_),
-    HazardPriority = ifelse(Element == "Adaptation priorities",         HazardPriority, NA_integer_),
-    HazardAction   = ifelse(Element == "Action",         HazardAction,   NA_integer_),
-    HazardResult   = ifelse(Element == "Result",         HazardResult,   NA_integer_),
-
+    HazardSystem   = ifelse(Element %in% system_elements, HazardSystem, NA_integer_),
+    HazardPriority = ifelse(Element == "Adaptation priorities", HazardPriority, NA_integer_),
+    HazardAction   = ifelse(Element == "Action",              HazardAction,   NA_integer_),
+    HazardResult   = ifelse(Element == "Result",              HazardResult,   NA_integer_),
     SystemPriority = ifelse(Element == "Adaptation priorities", SystemPriority, NA_integer_),
-    SystemAction   = ifelse(Element == "Action", SystemAction,   NA_integer_),
-    SystemResult   = ifelse(Element == "Result", SystemResult,   NA_integer_)
+    SystemAction   = ifelse(Element == "Action",               SystemAction,   NA_integer_),
+    SystemResult   = ifelse(Element == "Result",               SystemResult,   NA_integer_)
   )
+
 ```
 
 
