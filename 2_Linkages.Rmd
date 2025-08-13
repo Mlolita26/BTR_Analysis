@@ -243,14 +243,17 @@ linkage_summary <- linkage_summary_core %>%
 adaptdata <- adaptdata %>%
   left_join(linkage_summary_core, by = c("Country","Document","Year of Submission")) %>%
   mutate(
-    HazardSystem   = ifelse(Element %in% system_elements, HazardSystem, NA_integer_),
+    # put the doc-level flag on BOTH elements
+    HazardSystem   = ifelse(Element %in% c(system_elements, hazard_elements), HazardSystem, NA_integer_),
+
     HazardPriority = ifelse(Element == "Adaptation priorities", HazardPriority, NA_integer_),
-    HazardAction   = ifelse(Element == "Action",              HazardAction,   NA_integer_),
-    HazardResult   = ifelse(Element == "Result",              HazardResult,   NA_integer_),
+    HazardAction   = ifelse(Element == "Action",               HazardAction,   NA_integer_),
+    HazardResult   = ifelse(Element == "Result",               HazardResult,   NA_integer_),
     SystemPriority = ifelse(Element == "Adaptation priorities", SystemPriority, NA_integer_),
-    SystemAction   = ifelse(Element == "Action",               SystemAction,   NA_integer_),
-    SystemResult   = ifelse(Element == "Result",               SystemResult,   NA_integer_)
+    SystemAction   = ifelse(Element == "Action",                SystemAction,   NA_integer_),
+    SystemResult   = ifelse(Element == "Result",                SystemResult,   NA_integer_)
   )
+
 
 ```
 
