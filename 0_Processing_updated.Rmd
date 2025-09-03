@@ -21,6 +21,9 @@ library(tidyr)
 library(dplyr)
 library(readr)
 library(readxl)
+library(ggplot2)
+library(RColorBrewer)
+library(patchwork)
 ```
 
 # Preparation
@@ -247,6 +250,28 @@ DT::datatable(
     dom = 'tip'
   )
 )
+
+#3. Visualize hazard count
+
+
+hazard_plot <- ggplot(hazard_counts,
+       aes(x = reorder(`Hazard Category`, Occurrences),
+           y = Occurrences,
+           fill = Occurrences)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_viridis_c(option = "plasma", direction = -1, guide = "none") +
+  labs(title = "Hazard categories by count", x = NULL, y = "Occurrences") +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "none",
+    axis.text.y = element_text(size = 14),
+    axis.text.x = element_text(size = 14)
+  )
+
+hazard_plot
+
+
 
 ```
 
@@ -491,6 +516,24 @@ DT::datatable(
     dom = 'tip'
   )
 )
+
+# 3. Visualize systems at risk
+system_plot <- ggplot(system_counts,
+       aes(x = reorder(`System at Risk Category`, Occurrences),
+           y = Occurrences,
+           fill = `System at Risk Category`)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  scale_fill_viridis_d(option = "mako") +
+  labs(title = "Systems at risk by count", x = NULL, y = "Occurrences") +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.y = element_text(size = 14),
+    axis.text.x = element_text(size = 14)
+  )
+
+system_plot
+
 
 ```
 
@@ -745,6 +788,36 @@ DT::datatable(
   options = list(pageLength = 10, autoWidth = TRUE, dom = 'tip')
 )
 
+# visualize sector type 
+# IPCC
+p_ipcc <- ggplot(sector_ipcc_counts,
+                 aes(x = reorder(`IPCC Sector Category`, Occurrences),
+                     y = Occurrences, fill = Occurrences)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_viridis_c(option = "mako", guide = "none") +   
+  labs(title = "IPCC sectors (SectorType)", x = NULL, y = "Occurrences") +
+  theme_minimal(base_size = 12)
+
+# GGA
+p_gga <- ggplot(sector_gga_counts,
+                aes(x = reorder(`GGA Sector Category`, Occurrences),
+                    y = Occurrences, fill = Occurrences)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_viridis_c(option = "cividis", guide = "none") + 
+  labs(title = "GGA sectors (SectorType_GGA)", x = NULL, y = "Occurrences") +
+  theme_minimal(base_size = 12)
+
+# Panel + bigger axis text
+sector_plot <- (p_ipcc | p_gga) &
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(size = 14),
+    axis.text.y = element_text(size = 14)
+  )
+
+sector_plot
 ```
 
 ## Sector type raw data 
@@ -772,6 +845,8 @@ datatable(
   options = list(pageLength = 10, autoWidth = TRUE),
   caption = "🏷️ Tagged Sector Rows with IPCC and GGA Classification"
 )
+
+
 
 ```
 
@@ -801,6 +876,58 @@ adaptdata[] <- lapply(adaptdata, function(col) {
 })
 
 write.csv(adaptdata,"AdaptationElementsProcessed.csv")
+```
+
+# System at risk → IPCC sector → GGA
+
+```{r}
+# -------- Build triples (System -> IPCC -> GGA) --------
+
+library(dplyr)
+library(tidyr)
+library(stringr)
+
+# 1) Triples: System → IPCC → GGA
+triples <- adaptdata %>%
+  mutate(across(c(SystemType, SectorType, SectorType_GGA), ~na_if(., ""))) %>%
+  filter(!is.na(SystemType), !is.na(SectorType), !is.na(SectorType_GGA)) %>%
+  separate_rows(SystemType,     sep = ";") %>%
+  separate_rows(SectorType,     sep = ";") %>%
+  separate_rows(SectorType_GGA, sep = ";") %>%
+  mutate(across(c(SystemType, SectorType, SectorType_GGA), ~str_trim(.))) %>%
+  count(SystemType, SectorType, SectorType_GGA, name = "value") %>%
+  arrange(desc(value))
+
+# 2) Edge lists for Sankimatic (From, To, Value)
+edges_sys_ipcc <- triples %>%
+  count(SystemType, SectorType, wt = value, name = "value") %>%
+  rename(from = SystemType, to = SectorType)
+
+edges_ipcc_gga <- triples %>%
+  count(SectorType, SectorType_GGA, wt = value, name = "value") %>%
+  rename(from = SectorType, to = SectorType_GGA)
+
+write.table(edges_ipcc_gga, "edges_ipcc_gga.txt",
+            sep = " ", row.names = FALSE, col.names = TRUE, quote = FALSE,
+            fileEncoding = "UTF-8")
+
+# Build Sankimatic-formatted lines: "From [value] To"
+sankimatic_lines <- edges_sys_ipcc %>%
+  dplyr::mutate(
+    from = trimws(as.character(from)),
+    to   = trimws(as.character(to)),
+    line = paste0(from, " [", value, "] ", to)
+  ) %>%
+  dplyr::pull(line)
+
+# Preview in console
+cat(paste(sankimatic_lines, collapse = "\n"))
+
+# Write to a plain text file
+writeLines(sankimatic_lines, "edges_sys_ipcc_sankimatic.txt", useBytes = TRUE)
+
+
+
 ```
 
 # Remarks

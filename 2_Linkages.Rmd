@@ -397,9 +397,9 @@ DT::datatable(
 
 ```{r}
 # ---- 5) Save outputs --------------------------------------------------------
-# write.csv(linkage_summary,        "LinkageSummary_withEvidence.csv", row.names = FALSE)
-# write.csv(linkage_evidence,       "LinkageEvidence_long.csv",       row.names = FALSE)
-# write.csv(adaptdata_with_flags,   "AdaptationElements_withLinkages.csv", row.names = FALSE)
+ write.csv(linkage_summary,        "LinkageSummary_withEvidence.csv", row.names = FALSE)
+ write.csv(linkage_evidence,       "LinkageEvidence_long.csv",       row.names = FALSE)
+ write.csv(adaptdata_with_flags,   "AdaptationElements_withLinkages.csv", row.names = FALSE)
 
 
 ```
@@ -831,6 +831,145 @@ Interpreting the counts
 
 
 ```
+
+```{r,echo=FALSE}
+library(ggplot2)
+library(rnaturalearth)
+library(sf)
+library(dplyr)
+library(countrycode)
+# --- 1. Load base world map ---
+world_map <- ne_countries(scale = "medium", returnclass = "sf")
+
+# --- 2. Prepare linkage scores with ISO3 codes ---
+# Assumes you already have this:
+# by_country_links <- ... (with columns: Country, TotalLinks)
+
+world_scores <- by_country_links %>%
+  mutate(iso_a3 = countrycode(Country, origin = "country.name", destination = "iso3c"))
+
+# --- 3. Merge scores with world map ---
+world_merged <- world_map %>%
+  left_join(world_scores, by = "iso_a3")
+
+# --- 4. Plot global heatmap ---
+map<-ggplot(world_merged) +
+  geom_sf(aes(fill = TotalLinks), color = "gray90", size = 0.1) +
+  scale_fill_viridis_c(
+    option = "plasma", direction = -1,
+    na.value = "gray95", name = "Total Linkages"
+  ) +
+  theme_minimal() +
+  labs(
+    title = "Global Linkages in Adaptation Planning (BTRs/NAPs)",
+    subtitle = "Based on documented linkages between climate hazards and systems",
+    caption = "Darker colors = more linkages reported"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 10),
+    legend.position = "right"
+  )
+  
+
+
+# --- Step 1: Extract Document Type from the 'Document' field ---
+# Assumes 'Document' contains "NAP" or "BTR" (case-insensitive)
+linkage_summary <- linkage_summary %>%
+  mutate(DocType = case_when(
+    str_detect(tolower(Document), "nap") ~ "NAP",
+    str_detect(tolower(Document), "btr") ~ "BTR",
+    TRUE ~ "Other"
+  ))
+
+# --- Step 2: Reshape the data to long format ---
+violin_df <- linkage_summary %>%
+  select(Document, Country, DocType,
+         HazardSystem, HazardPriority, HazardAction, HazardResult,
+         SystemPriority, SystemAction, SystemResult) %>%
+  pivot_longer(
+    cols = starts_with("Hazard") | starts_with("System"),
+    names_to = "LinkageType",
+    values_to = "Score"
+  ) %>%
+  filter(!is.na(Score))
+
+# --- Step 3: Violin plot grouped by DocType ---
+violin_plot<-ggplot(violin_df, aes(x = LinkageType, y = Score, fill = LinkageType)) +
+  geom_violin(scale = "count", trim = FALSE, alpha = 0.8, color = NA) +
+  geom_jitter(width = 0.15, height = 0.05, size = 1.2, alpha = 0.4) +
+  facet_wrap(~ DocType, ncol = 1, scales = "free_x") +
+  scale_y_continuous(breaks = c(0, 1), limits = c(-0.1, 1.1), expand = expansion(add = 0.05)) +
+  scale_fill_viridis_d(option = "plasma", begin = 0.1, end = 0.9) +
+  labs(
+    title = "Linkage Score Distributions by Document Type",
+    x = "Linkage Type",
+    y = "Presence (0 = absent, 1 = present)"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    axis.text.x = element_text(angle = 35, hjust = 1),
+    legend.position = "none",
+    panel.grid.major.y = element_line(color = "gray80", linetype = "dashed"),
+    strip.text = element_text(face = "bold")
+  )
+
+#---------
+# --- 1. Define element → aspect mapping ---
+aspect_map <- tibble::tibble(
+  Element = c("Hazard", "Climate impact", "System at risk",
+              "Adaptation priorities",
+              "Action", "Barriers",
+              "Result", "Indicator"),
+  Aspect = c("Impact", "Impact", "Impact",
+             "Planning",
+             "Implementation", "Implementation",
+             "MEL", "MEL")
+)
+
+# --- 2. Join aspect to adaptdata + filter meaningful content ---
+# Require: Element exists in map, and ElementText is non-empty and informative
+adapt_with_aspect <- adaptdata %>%
+  filter(Element %in% aspect_map$Element) %>%
+  filter(!is.na(ElementText) & str_trim(ElementText) != "") %>%
+  filter(str_count(ElementText, "\\w+") > 5) %>%  # Require at least 5 words of content
+  left_join(aspect_map, by = "Element") %>%
+  distinct(Country, Document, Aspect)
+
+# --- 3. Create presence matrix: one row per document ---
+doc_aspects <- adapt_with_aspect %>%
+  distinct(Country, Document, Aspect) %>%
+  mutate(Present = 1) %>%
+  pivot_wider(names_from = Aspect, values_from = Present, values_fill = 0) %>%
+  mutate(NumAspectsCovered = rowSums(across(c("Impact", "Planning", "Implementation", "MEL"))))
+
+# --- 4. Summary: How many BTRs cover all 4 aspects? ---
+doc_aspect_summary <- doc_aspects %>%
+  count(NumAspectsCovered)
+
+# --- 5. Optional: % of BTRs with each individual aspect ---
+aspect_coverage_summary <- doc_aspects %>%
+  summarise(across(c("Impact", "Planning", "Implementation", "MEL"), ~ mean(.x) * 100)) %>%
+  pivot_longer(everything(), names_to = "Aspect", values_to = "PercentOfBTRs")
+
+# --- 3. Create presence matrix: one row per document ---
+doc_aspects <- adapt_with_aspect %>%
+  distinct(Country, Document, Aspect) %>%
+  mutate(Present = 1) %>%
+  pivot_wider(names_from = Aspect, values_from = Present, values_fill = 0) %>%
+  # Rename Impact -> IVRA
+  rename(IVRA = Impact) %>%
+  # Reorder columns
+  select(Country, Document, IVRA, Planning, Implementation, MEL) %>%
+  mutate(NumAspectsCovered = rowSums(across(c("IVRA", "Planning", "Implementation", "MEL"))))
+write.csv(doc_aspects,   "doc_aspects.csv", row.names = FALSE)
+
+```
+
+
+
+
+```
 This table lists **only** the documents where the two linkage modes disagree for Q11–Q13:
 
 - **Co-presence** = linkage flagged when both elements appear somewhere in the document.
@@ -852,4 +991,4 @@ Interpreting rows
   *Actionable next step:* inspect **Ev (Co-presence)**, then search the source for a clearer tie.
 - **Co = 0, Strict = 1** → Should **not** occur (STRICT is a subset of Co-presence). If observed, check data/tagging.
 
-
+```

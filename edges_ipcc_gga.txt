@@ -1,0 +1,7 @@
+from to value
+Cities, settlements, key infrastructure Infrastructure and human settlements 971
+Food, fiber, other ecosystem products Food and agriculture 502
+Health, wellbeing, communities Health 239
+Livelihoods, poverty, sustainable development Poverty eradication and livelihoods 196
+Ocean, coastal ecosystems Biodiversity and ecosystems 84
+Terrestrial, freshwater ecosystems Biodiversity and ecosystems 344

@@ -1,0 +1,67 @@
+Biodiversity [31] Cities, settlements, key infrastructure
+Biodiversity [14] Food, fiber, other ecosystem products
+Biodiversity [13] Health, wellbeing, communities
+Biodiversity [10] Livelihoods, poverty, sustainable development
+Biodiversity [3] Ocean, coastal ecosystems
+Biodiversity [81] Terrestrial, freshwater ecosystems
+Coastal [81] Cities, settlements, key infrastructure
+Coastal [26] Food, fiber, other ecosystem products
+Coastal [14] Health, wellbeing, communities
+Coastal [14] Livelihoods, poverty, sustainable development
+Coastal [72] Ocean, coastal ecosystems
+Coastal [35] Terrestrial, freshwater ecosystems
+Crop [61] Cities, settlements, key infrastructure
+Crop [179] Food, fiber, other ecosystem products
+Crop [23] Health, wellbeing, communities
+Crop [18] Livelihoods, poverty, sustainable development
+Crop [1] Ocean, coastal ecosystems
+Crop [29] Terrestrial, freshwater ecosystems
+Fisheries and aquaculture [8] Cities, settlements, key infrastructure
+Fisheries and aquaculture [34] Food, fiber, other ecosystem products
+Fisheries and aquaculture [3] Health, wellbeing, communities
+Fisheries and aquaculture [5] Livelihoods, poverty, sustainable development
+Fisheries and aquaculture [2] Ocean, coastal ecosystems
+Fisheries and aquaculture [5] Terrestrial, freshwater ecosystems
+Food and nutrition [7] Cities, settlements, key infrastructure
+Food and nutrition [19] Food, fiber, other ecosystem products
+Food and nutrition [4] Health, wellbeing, communities
+Food and nutrition [2] Livelihoods, poverty, sustainable development
+Food and nutrition [4] Terrestrial, freshwater ecosystems
+Forest [21] Cities, settlements, key infrastructure
+Forest [37] Food, fiber, other ecosystem products
+Forest [15] Health, wellbeing, communities
+Forest [4] Livelihoods, poverty, sustainable development
+Forest [4] Ocean, coastal ecosystems
+Forest [27] Terrestrial, freshwater ecosystems
+Freshwater [90] Cities, settlements, key infrastructure
+Freshwater [30] Food, fiber, other ecosystem products
+Freshwater [20] Health, wellbeing, communities
+Freshwater [15] Livelihoods, poverty, sustainable development
+Freshwater [123] Terrestrial, freshwater ecosystems
+Gender and inclusion [18] Cities, settlements, key infrastructure
+Gender and inclusion [1] Food, fiber, other ecosystem products
+Health [82] Cities, settlements, key infrastructure
+Health [30] Food, fiber, other ecosystem products
+Health [123] Health, wellbeing, communities
+Health [14] Livelihoods, poverty, sustainable development
+Health [1] Ocean, coastal ecosystems
+Human security and Peace [7] Cities, settlements, key infrastructure
+Human security and Peace [7] Food, fiber, other ecosystem products
+Human security and Peace [16] Health, wellbeing, communities
+Human security and Peace [5] Livelihoods, poverty, sustainable development
+Infrastructure and services [439] Cities, settlements, key infrastructure
+Infrastructure and services [35] Food, fiber, other ecosystem products
+Livelihoods and poverty [72] Cities, settlements, key infrastructure
+Livelihoods and poverty [42] Food, fiber, other ecosystem products
+Livelihoods and poverty [96] Livelihoods, poverty, sustainable development
+Livestock [6] Cities, settlements, key infrastructure
+Livestock [41] Food, fiber, other ecosystem products
+Livestock [2] Health, wellbeing, communities
+Livestock [3] Livelihoods, poverty, sustainable development
+Livestock [2] Terrestrial, freshwater ecosystems
+Terrestrial [48] Cities, settlements, key infrastructure
+Terrestrial [7] Food, fiber, other ecosystem products
+Terrestrial [6] Health, wellbeing, communities
+Terrestrial [10] Livelihoods, poverty, sustainable development
+Terrestrial [1] Ocean, coastal ecosystems
+Terrestrial [38] Terrestrial, freshwater ecosystems
