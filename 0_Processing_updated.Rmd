@@ -251,6 +251,8 @@ DT::datatable(
   )
 )
 
+write.csv(hazard_counts,   "hazard_counts.csv", row.names = FALSE)
+
 #3. Visualize hazard count
 
 
@@ -300,6 +302,8 @@ datatable(
   options = list(pageLength = 10, autoWidth = TRUE),
   caption = "📄 Hazard elements and their assigned HazardType"
 )
+
+write.csv(hazard_table,   "hazard_table.csv", row.names = FALSE)
 
 ```
 
@@ -517,6 +521,8 @@ DT::datatable(
   )
 )
 
+write.csv(system_counts,   "system_counts.csv", row.names = FALSE)
+
 # 3. Visualize systems at risk
 system_plot <- ggplot(system_counts,
        aes(x = reorder(`System at Risk Category`, Occurrences),
@@ -562,6 +568,7 @@ DT::datatable(
   options = list(pageLength = 10, autoWidth = TRUE),
   caption = "📌 Tagged 'System at risk' Rows with Assigned Categories"
 )
+
 
 
 ```
@@ -787,6 +794,8 @@ DT::datatable(
   caption = "📊 GGA Sector Themes (SectorType_GGA)",
   options = list(pageLength = 10, autoWidth = TRUE, dom = 'tip')
 )
+write.csv(sector_ipcc_counts,   "sector_ipcc_counts.csv", row.names = FALSE)
+write.csv(sector_gga_counts,   "sector_gga_counts.csv", row.names = FALSE)
 
 # visualize sector type 
 # IPCC
@@ -878,6 +887,52 @@ adaptdata[] <- lapply(adaptdata, function(col) {
 write.csv(adaptdata,"AdaptationElementsProcessed.csv")
 ```
 
+
+```{r}
+#------- Missing classifications
+# 1) Clean NA-like strings
+adapt_clean <- adaptdata %>%
+  mutate(across(
+    c(SectorType, SectorType_GGA),
+    ~na_if(trimws(.), "")
+  )) %>%
+  mutate(across(
+    c(SectorType, SectorType_GGA),
+    ~na_if(., "NA")
+  ))
+
+# 2) Filter: Element is "System at risk" AND both sector fields are missing
+missing_sector_rows <- adapt_clean %>%
+  filter(
+    Element == "System at risk",
+    is.na(SectorType),
+    is.na(SectorType_GGA)
+  ) %>%
+  # pick columns you want in the export (add/remove as needed)
+  select(
+    Country, Document, Element, ElementLabel,HazardType, SystemType, Sector, SectorType, SectorType_GGA,
+    ElementText
+  )
+
+write.csv(missing_sector_rows, "missing_ipcc_gga_for_system_at_risk.csv", row.names = FALSE)
+
+# Filter: Element == "System at risk" AND SystemType is missing
+system_at_risk_but_no_system <- adapt_clean %>%
+  filter(
+    Element == "System at risk",
+    is.na(SystemType)
+  ) %>%
+  select(
+    Country, Document, Element, ElementText,HazardType,
+    SystemType, SectorType, SectorType_GGA
+  )
+
+write.csv(system_at_risk_but_no_system,
+          "system_at_risk_without_systemtype.csv",
+          row.names = FALSE)
+
+```
+
 # System at risk → IPCC sector → GGA
 
 ```{r}
@@ -887,45 +942,30 @@ library(dplyr)
 library(tidyr)
 library(stringr)
 
-# 1) Triples: System → IPCC → GGA
+# Clean NA-like strings and whitespace
+adaptdata <- adaptdata %>%
+  mutate(across(
+    c(SystemType, SectorType, SectorType_GGA),
+    ~na_if(trimws(.), "")
+  )) %>%
+  mutate(across(
+    c(SystemType, SectorType, SectorType_GGA),
+    ~na_if(., "NA")  # Handle "NA" strings
+  ))
+
 triples <- adaptdata %>%
-  mutate(across(c(SystemType, SectorType, SectorType_GGA), ~na_if(., ""))) %>%
-  filter(!is.na(SystemType), !is.na(SectorType), !is.na(SectorType_GGA)) %>%
-  separate_rows(SystemType,     sep = ";") %>%
-  separate_rows(SectorType,     sep = ";") %>%
-  separate_rows(SectorType_GGA, sep = ";") %>%
-  mutate(across(c(SystemType, SectorType, SectorType_GGA), ~str_trim(.))) %>%
+  filter(
+    !is.na(SystemType),
+    !is.na(SectorType),
+    !is.na(SectorType_GGA)
+  ) %>%
   count(SystemType, SectorType, SectorType_GGA, name = "value") %>%
   arrange(desc(value))
 
-# 2) Edge lists for Sankimatic (From, To, Value)
-edges_sys_ipcc <- triples %>%
-  count(SystemType, SectorType, wt = value, name = "value") %>%
-  rename(from = SystemType, to = SectorType)
-
-edges_ipcc_gga <- triples %>%
-  count(SectorType, SectorType_GGA, wt = value, name = "value") %>%
-  rename(from = SectorType, to = SectorType_GGA)
-
-write.table(edges_ipcc_gga, "edges_ipcc_gga.txt",
-            sep = " ", row.names = FALSE, col.names = TRUE, quote = FALSE,
-            fileEncoding = "UTF-8")
-
-# Build Sankimatic-formatted lines: "From [value] To"
-sankimatic_lines <- edges_sys_ipcc %>%
-  dplyr::mutate(
-    from = trimws(as.character(from)),
-    to   = trimws(as.character(to)),
-    line = paste0(from, " [", value, "] ", to)
-  ) %>%
-  dplyr::pull(line)
-
-# Preview in console
-cat(paste(sankimatic_lines, collapse = "\n"))
-
-# Write to a plain text file
-writeLines(sankimatic_lines, "edges_sys_ipcc_sankimatic.txt", useBytes = TRUE)
-
+edges_sys_sector <- triples %>%
+  count(from = SystemType, to = SectorType, wt = value, name = "value")
+edges_sector_gga <- triples %>%
+  count(from = SectorType, to = SectorType_GGA, wt = value, name = "value")
 
 
 ```
