@@ -1057,6 +1057,7 @@ datatable(
     - Water quality deterioration  
     - Crop production loss  
     - Livestock impacts  
+    - Soil degradation
     - Fisheries & aquaculture decline  
     - Food security & nutrition decline  
     - Human health burden  
@@ -1365,23 +1366,31 @@ impact_categories <- tribble(
 
   "Water availability shortfall",
   "water shortage/shortages/scarcity/stress;water reserves;groundwater levels;fresh water quantities;water levels; reduced availability/flows/groundwater; aquifer depletion; falling levels; increased/rising/higher/growing water demand(s);water management; pressure to meet water demands; supply–demand imbalance; competition for water",
-  "(?i)\\b((water (shortage(s)?|scarcity|stress|deficit(s)?))|groundwater supply|water levels|groundwater deficits|(shortage|scarcity) of water|limited (safe )?drinking water (availability|supply)|limited water availability|reduced (availability of )?water|reduced (river|stream|surface water|groundwater|runoff|recharge|discharge)|decreas(?:e|ed|ing) (in )?(river|stream|groundwater|runoff|discharge|flow rates?)|less (river|stream) runoff|\\bwater resource(s)?\\b|\\bwater availability\\b|\\bwater supply\\b|\\bwater resources\\b|lower(?:ing)? (groundwater|water) level(s)?|falling water level(s)?|aquifer (deplet|declin)|water supply (shortage(s)?|deficit(s)?)|(?:increas(?:ed|ing)|rising|higher|growing)\\s+(?:water\\s+)?demand(s)?|pressure to meet water demand(s)?|water (?:demand|consumption) (?:increase|growth|rising)|(?:imbalance|gap) between (?:water )?supply (?:and|&) demand|demand(s)? exceed(?:s|ing) (?:water )?supply|(?:competition|conflict)s? (?:for|over) water)\\b",
+  "(?i)\\b((water (shortage(s)?|scarcity|stress|deficit(s)?))|groundwater supply|water levels|groundwater deficits|(shortage|scarcity) of water|limited (safe )?drinking water (availability|supply)|limited water availability|groundwater recharge|Reduced freshwater availability|reduced (availability of )?water|increase water demand|recharge of groundwater|recharge rates|water loss|dams|lowering of groundwater levels|freshwater availability|reduced (river|stream|surface water|challenges in water management|groundwater|runoff|recharge|discharge)|decreas(?:e|ed|ing) (in )?(river|stream|groundwater|runoff|discharge|flow rates?)|less (river|stream) runoff|\\bwater resource(s)?\\b|\\bwater availability\\b|\\bwater supply\\b|\\bwater resources\\b|lower(?:ing)? (groundwater|water) level(s)?|reduced fresh water|falling water level(s)?|aquifer (deplet|declin)|water supply (shortage(s)?|deficit(s)?)|(?:increas(?:ed|ing)|rising|higher|growing)\\s+(?:water\\s+)?demand(s)?|pressure to meet water demand(s)?|water (?:demand|consumption) (?:increase|growth|rising)|(?:imbalance|gap) between (?:water )?supply (?:and|&) demand|demand(s)? exceed(?:s|ing) (?:water )?supply|(?:competition|conflict)s? (?:for|over) water)\\b",
 
   "Water quality deterioration",
   "salinization/saltwater intrusion; contamination; pollutant concentration; microbial/bacterial growth; algal bloom; HABs; hypoxia; nutrient imbalance; turbidity; sedimentation/siltation; reduced/compromised/threatened water quality",
-  "(?i)\\b((reduced|diminished) water quality|threaten(?:s|ed|ing)? (drinking )?water quality|compromis(?:e|es|ed|ing) (drinking )?water quality|affect(?:s|ed|ing)? (drinking )?water quality|water pollution|potable water|salini[sz]ation|salt\\s*water intrusion|seawater intrusion|contaminat(?:ed|ion)|pollutant(s)?|higher concentration(s)? of pollutants?|water filtraton|clean water|microbial growth|bacterial growth|algal bloom(s)?|harmful algal bloom(s)?|HABs?|hypox(?:ia|ic)|low oxygen|nutrient imbalance(s)?|eutrophication|turbidity|sediment(?:ation| load|s|ation rates?)|siltation)\\b",
+  "(?i)\\b((reduced|diminished) water quality|threaten(?:s|ed|ing)? (drinking )?water quality|compromis(?:e|es|ed|ing) (drinking )?water quality|affect(?:s|ed|ing)? (drinking )?water quality|water pollution|quality water|potable water|salini[sz]ation|salt\\s*water intrusion|water quality|seawater intrusion|contaminat(?:ed|ion)|pollutant(s)?|higher concentration(s)? of pollutants?|water filtraton|clean water|microbial growth|bacterial growth|algal bloom(s)?|harmful algal bloom(s)?|HABs?|hypox(?:ia|ic)|low oxygen|nutrient imbalance(s)?|eutrophication|turbidity|sediment(?:ation| load|s|ation rates?)|siltation)\\b",
 
   "Crop production loss",
   "reduced/poor yields; yield decline/variability; crop loss/failure/damage/destroyed;lower yields; reduced agricultural productivity/production;agricultural losses;decreased production;reduce crop yields; postharvest losses;decreased crop yields; affect agricultural production",
-  "(?i)\\b(reduced yields?|yield (declin|decreas|variab|loss(es)?)|impacts on crop yields|production loss|production losses|reduce yields|damage to agriculture|impacting agriculture|decrease in food crop production|poor (harvest|yields?)|loss (?:of )?harvest(s)?|harvest (loss|losses)|crop (loss|losses|failure|damage|damages|destroy(?:ed|s)?|destroyed)|damage(?:d)? (?:to )?crops|affect(?:s|ed|ing)? (agricultur\\w* )?production|decreased crop yield(s)|reduce crop yields|reduced (agri\\w* )?(productivity|production)|post[- ]?harvest losses?|impacting productivity|lower agricultural yields?)\\b",
+  "(?i)\\b(reduced yields?|yield (declin|decreas|variab|loss(es)?)|impacts on crop yields|production loss|production losses|reduce yields|low agricultural production|agricultural losses|loss rates|decreased production|damage to agriculture|impacting agriculture|decrease in food crop production|Average Annual Losses|AAL|reduce agricultural productivity|reduction in yield|Decrease in yields|falling yields|poor (harvest|yields?)|wood|drop in agricultural production|Loss of yield|Decrease in crop yield|timber|loss of the yield|loss (?:of )?harvest(s)?|harvest (loss|losses)|harm field crops|crop (loss|losses|failure|damage|damages|destroy(?:ed|s)?|destroyed)|damage(?:d)? (?:to )?crops|affect(?:s|ed|ing)? (agricultur\\w* )?production|decreased crop yield(s)|reduce crop yields|reduced (agri\\w* )?(productivity|production)|post[- ]?harvest losses?|impacting productivity|lower agricultural yields?)\\b",
 
   "Livestock impacts",
-  "heat/thermal stress on livestock; livestock disease/mortality; productivity/breeding impacts; feed shortages; cattle loss",
-  "(?i)\\b((heat|thermal) stress( (?:in|on))? livestock|livestock (?:disease|loss(?:es)?|livestock health|mortality|deaths?|health issues?|losses in livestock|productivity|livestock diseases|loss of livestock|breeding|breeding (issues|impacts))|feed (shortage|issues)|cattle (killed|loss(?:es)?))\\b",
+"livestock health; animal health; herd health; heat stress on livestock; thermal stress on livestock; livestock disease; livestock morbidity; livestock mortality; cattle deaths; productivity loss in livestock; reduced livestock productivity; breeding impacts; breeding performance; feed shortages; fodder shortages; cattle loss",
+"(?i)\\b(
+  (heat|thermal)\\s+stress(?:\\s+(?:in|on))?\\s+(?:livestock|animals?|cattle|herds?)|
+  (?:livestock|animal|cattle|herd)\\s+(?:health|morbidity|diseases?|mortality|deaths?|loss(?:es)?|productivity|breeding(?:\\s+(?:issues|impacts|performance|success))?)|
+  health\\s+of\\s+(?:livestock|animals?|cattle|herds?)|losses in livestock|
+  loss(?:es)?\\s+in\\s+(?:livestock|animals?|cattle|herds?)|
+  (?:feed|fodder)\\s+(?:shortage|shortages|scarcity|deficit|crisis)|
+  cattle\\s+(?:killed|loss(?:es)?)
+)\\b",
+
 
   "Fisheries & aquaculture decline",
   "fish stock decline; fisheries productivity/catch loss; aquaculture loss; impaired shell formation; coral loss affecting fisheries",
-  "(?i)\\b((fisher(?:y|ies)|aquaculture|catch(?:es)?).*(declin|loss|reduct|impact|decreas|fall)|fish stock(s)?\\b|decline in (?:fish )?catch(?: rates)?|catch rates? (declin|drop|fall)|shell (formation|growth) (impair|inhibit))\\b",
+  "(?i)\\b((fisher(?:y|ies)|aquaculture|catch(?:es)?).*(declin|loss|reduct|impact|decreas|fall)|fish stock(s)?\\b|decline in (?:fish )?catch(?: rates)?|catch rates? (declin|drop|fall)|shell (formation|growth) (impair|inhibit))|fisheries|fishing\\b",
 
   "Food security & nutrition decline",
   "food insecurity/shortage; supply disruptions; hunger; malnutrition/undernutrition; food price spikes/inflation",
@@ -1389,19 +1398,19 @@ impact_categories <- tribble(
 
   "Human health burden",
   "heat-related illness/illnesses/heatstroke;heat-related conditions; respiratory issues; health issues;poor health; allergy; cardiovascular/kidney stress; morbidity;diarrhea; vector-/water-/food-borne disease; diarrhoeal disease;virus; UHI",
-  "(?i)\\b(health risks|affect(?:s|ed|ing)? human health|heat[- ]?related illness(?:es)?|heatstroke|heat stress (?:on|for) (?:people|humans|workers)|respiratory (issues|diseases?)|allerg(?:y|ies)|morbidity|epidemic|virus|heat related diseases|respiratory problems|allergenic|poor health|heat stroke|dehydration|mosquito|infectious diseases|health issues|cardiovascular diseases?|kidney (stress|injur(?:y|ies)|failure)|vector[- ]borne diseases?|unhealthy|human lives|water[- ]borne diseases?|threatening the lives|food[- ]borne diseases?|malaria|dengue|Aedes (aegypti|albopictus)|cholera|campylobacter(?:iosis)?|cryptosporid(?:iosis)?|diarr(h)?(ea|heal) (disease|infection|infections)|urban heat island(s)?)\\b",
+  "(?i)\\b(health risks|affect(?:s|ed|ing)? human health|heat[- ]?related illness(?:es)?|heatstroke|heat stress (?:on|for) (?:people|humans|workers)|respiratory (issues|diseases?)|allerg(?:y|ies)|morbidity|health threats|epidemic|heat-related conditions|virus|heat related diseases|health conditions|heat stress-related illnesses|respiratory problems|allergenic|poor health|heat stroke|dehydration|mosquito|epidemics|health problems|diarrhea|infectious diseases|health issues|cardiovascular diseases?|kidney (stress|injur(?:y|ies)|failure)|vector[- ]borne diseases?|unhealthy|human lives|human health|water[- ]borne diseases?|threatening the lives|food[- ]borne diseases?|malaria|dengue|Aedes (aegypti|albopictus)|cholera|campylobacter(?:iosis)?|cryptosporid(?:iosis)?|diarr(h)?(ea|heal) (disease|infection|infections)|urban heat island(s)?)\\b",
 
   "Mental health impacts",
   "anxiety; depression; PTSD; psychological distress; trauma; suicide risk",
-  "(?i)\\b(mental (health|well[- ]?being)|psychological (distress|stress)|anxiet(y|ies)|depress(ion|ive)|post[- ]traumatic stress disorder|PTSD|trauma|suicide risk)\\b",
+  "(?i)\\b(mental (health|well[- ]?being)|discomfort|psychological (distress|stress)|anxiet(y|ies)|depress(ion|ive)|exhaustion|post[- ]traumatic stress disorder|PTSD|trauma|suicide risk)\\b",
 
   "Healthcare system strain",
   "overburdened health services;health infrastructures;healthcare system; hospital admissions rising; overwhelmed/closed clinics/hospitals; service backlogs",
-  "(?i)\\b((health\\s*care|healthcare) (system|services?).*(overburdened|strained|overwhelmed|capacity (exceed|shortage)|backlog(s)?)|increase(d)? hospital (admission|admissions)|overburdened health services|(?:clinic|hospital)(s)? (overwhelmed|nonfunctional|closed)|shortages of medical supplies|healthcare facilities|healthcare system|public health)\\b",
+  "(?i)\\b((health\\s*care|healthcare) (system|services?).*(overburdened|strained|overwhelmed|capacity (exceed|shortage)|backlog(s)?)|increase(d)? hospital (admission|admissions)|overburdened health services|(?:clinic|hospital)(s)? (overwhelmed|nonfunctional|closed)|shortages of medical supplies|healthcare facilities|healthcare system|public health|hospital destroyed|health infrastructure)\\b",
 
   "Mortality & injury",
   "deaths/fatalities/mortality;died; loss of life; people killed; drowning; injuries; casualties; excess deaths",
-  "(?i)\\b(deaths?|fatalit(?:y|ies)|mortality|loss(?:es)? of life|people (?:killed|dead)|\\d+ (?:people|persons) (?:killed|dead)|drown(?:ing|ed)|injur(?:y|ies|ed)|died|loss of human life|casualt(?:y|ies)|excess deaths?)\\b",
+  "(?i)\\b(deaths?|fatalit(?:y|ies)|mortality|loss(?:es)? of life|lives|people (?:killed|dead)|\\d+ (?:people|persons) (?:killed|dead)|drown(?:ing|ed)|injur(?:y|ies|ed)|died|loss of human life|casualt(?:y|ies)|excess deaths?)\\b",
 
   "Displacement & migration",
   "displacement; evacuation; relocation; forced migration",
@@ -1410,8 +1419,8 @@ impact_categories <- tribble(
  "Damage to buildings & infrastructure",
 "houses/buildings damaged or destroyed; property/infrastructure damage; shortened asset lifespan; reservoir damage",
 "(?i)\\b(
-   (house(s)?|home(s)?|building(s)?|property|infrastructure|reservoir(s)?).*(damage(?:d)?|destroy(?:ed|s)?|deteriorat|loss(?:es)?) |aging infrastructure|damage to infrastructure|damage to buildings|buildings|
-   (damage(?:d)?|destroy(?:ed|s)?|deteriorat|loss(?:es)?).*(house(s)?|home(s)?|building(s)?|property|infrastructure|reservoir(s)?) |damaging infrastructure|inadequate infrastructure|lack proper infrastructure|endanger infrastructure|
+   (house(s)?|home(s)?|building(s)?|property|infrastructure|reservoir(s)?).*(damage(?:d)?|destroy(?:ed|s)?|deteriorat|loss(?:es)?) |aging infrastructure|damage to infrastructure|damage infrastructure|damage to buildings|Damage to building|building|buildings|aging infrastructure|damage and failure of infrastructure|Infrastructure vulnerability|
+   (damage(?:d)?|destroy(?:ed|s)?|deteriorat|loss(?:es)?).*(house(s)?|home(s)?|building(s)?|property|infrastructure|reservoir(s)?) |damaging infrastructure|aging infrastructure|damage infrastructure|infrastructure damages|negative impacts on infrastructure|infrastructure suffered|infrastructure damage|inadequate infrastructure|lack proper infrastructure|endanger infrastructure|
    (lifespan|service life) (reduc|shorten|decreas)(ed)?
 )\\b
 |\\b(houses|buildings)\\s+damaged\\s+or\\s+destroyed\\b
@@ -1422,7 +1431,7 @@ impact_categories <- tribble(
 
   "Energy system impacts",
   "reduced hydropower; outages/power cuts; grid/transmission issues; reduced plant efficiency; increased cooling demand; reduced heating demand; coal quality reduced",
-  "(?i)\\b(hydropower|power cut(s)?|outage(s)?|electricit(?:y|y grid)|substation(s)?|energy|cooling|transmission (line|lines|efficiency)|grid|plant efficiency|coal quality|energy demand (for )?cooling|cooling demand|reduced heating demand|energy (supply|system))\\b",
+  "(?i)\\b(hydropower|power cut(s)?|outage(s)?|electricit(?:y|y grid)|substation(s)?|energy|cooling|power supply|transmission (line|lines|efficiency)|grid|plant efficiency|coal quality|energy demand (for )?cooling|cooling demand|reduced heating demand|energy (supply|system))\\b",
 
   "Transport disruption",
   "roads/bridges/rail/ports/airports damaged; access routes blocked/cut/closed; services disrupted; road damage/closures",
@@ -1434,15 +1443,15 @@ impact_categories <- tribble(
 
   "Economic & livelihood losses",
   "GDP loss; economic losses/costs; productivity loss; labor productivity decline; livelihood/income/job loss; losses & damages; operating/compliance costs; price spikes",
-  "(?i)\\b(GDP\\b|economic (loss|losses|damage|damages|costs)|destroyed several farm|socio-economic impact|rural livelihoods|property losses|productivity (loss|declin|reduct)|decreas(?:e|ed|ing) (labor|worker) productivity|livelihood(s)? (loss|impact)|homes damaged|income (loss|declin)|job(s)? (loss|cuts)|financial losses|losses? and damages?|operational cost(s)? (increase|increases)|property damage|employment|job|jobs|livelihoods|poor housing conditions|food prices|damage to property|precarious location|local economies|compliance cost(s)? (increase|increases)|price (spike|spikes|increase|increases|fluctuation(s)?))\\b",
+  "(?i)\\b(GDP\\b|economic (loss|losses|damage|damages|costs)|destroyed several farm|socio-economic impact|rural livelihoods|property losses|productivity (loss|declin|reduct)|decreas(?:e|ed|ing) (labor|worker) productivity|livelihood(s)? (loss|impact)|homes damaged|socio-economic|homes|income (loss|declin)|job(s)? (loss|cuts)|financial losses|losses? and damages?|operational cost(s)? (increase|increases)|property damage|employment|job|jobs|livelihoods|poor housing conditions|social and economic effects|food prices|damage to property|precarious location|local economies|compliance cost(s)? (increase|increases)|price (spike|spikes|increase|increases|fluctuation(s)?))\\b",
 
   "Tourism & recreation impacts",
   "reduced tourist numbers; shorter/shortened snow season; coastal tourism loss; tourism revenue decline; visitors discouraged;outdoor activities; shorter stays; outdoor activities hindered;reduce tourist numbers;shorten average stays",
-  "(?i)\\b((?:touris(m|t)s?|visitor(s)?|recreation|ski|tourism|winter tourism|reduced tourist arrivals|negatively impact tourism|affect tourism|tourist|snow cover|beach(es)?|winter (season|touris(m|t))).*(reduced|declin|shorter|shorten(?:ed|ing)?|loss|damage|discourage|deter|unviable|impact)|tourism revenue|tourism demand|average (stay|stays) (shorten|shorter)|outdoor activities? (hinder(?:ed|ing)?|limited|snow cover|tourist))\\b",
+  "(?i)\\b((?:touris(m|t)s?|visitor(s)?|recreation|ski|tourism|winter tourism|reduced tourist arrivals|negatively impact tourism|affect tourism|tourist|snow cover|reduce tourist|shorten average stays|beach(es)?|winter (season|touris(m|t))).*(reduced|declin|shorter|shorten(?:ed|ing)?|loss|damage|discourage|deter|unviable|impact)|tourism revenue|tourism demand|reduction in tourism activity|average (stay|stays) (shorten|shorter)|outdoor activities? (hinder(?:ed|ing)?|limited|snow cover|tourist))\\b",
 
   "Ecosystem degradation & biodiversity loss",
   "habitat degradation/loss; ecosystem integrity/functions reduced; biodiversity loss; loss of forest functions; species decline/shift/extinction;coral bleaching;loss of habitats; invasive species;forest degradation; disruption of wildlife;habitat degradation;loss of species; habitat deterioration;ecosystem service loss; reduce ecosystem service; forest health/growth decline; wildfire severity increase; coral loss/bleaching; wildlife disruption",
-  "(?i)\\b(habitat (degrad|deteriorat|loss)|biodiversit(?:y|y loss)|reef loss|coral cover|tree diversity|loss of species|key species|ecosystem (integrity|function(s)?|services?) (declin|loss|disrupt|reduct)|disrupt(?:ion of )?ecosystem(s)?|wildlife (disrupt|disturb|declin)|disruption of wildlife|genetic diversity|habitat deterioration|habitat degradation|habitat|habitats|deforestation|distribution ranges|extinction|extinctions|species (declin|loss|extinct|range (shift|reduc))|invasive species|ecosystem (service(s)? (loss|reduct)|degrad|function(s)? (disrupt|loss))|forest (health|degrad|dieback|mortality)|wildfire (severity|risk) (increase|increased)|coral (reef )?(loss|degrad|bleach)|tree (growth|health) (declin|reduc))\\b",
+  "(?i)\\b(habitat (degrad|deteriorat|loss)|biodiversit(?:y|y loss)|reef loss|coral cover|tree diversity|loss of species|key species|ecosystem (integrity|function(s)?|services?) (declin|loss|disrupt|reduct)|disrupt(?:ion of )?ecosystem(s)?|wildlife (disrupt|disturb|declin)|disruption of wildlife|species richness|tree cover|genetic diversity|diversity of species|coral bleaching|wildlife|coral reefs|reduce ecosystem service|habitat deterioration|habitat degradation|habitat|habitats|species composition|deforestation|distribution ranges|extinction|extinctions|species (declin|loss|extinct|range (shift|reduc))|invasive species|ecosystem (service(s)? (loss|reduct)|degrad|function(s)? (disrupt|loss))|forest (health|degrad|dieback|mortality)|wildfire (severity|risk) (increase|increased)|coral (reef )?(loss|degrad|bleach)|tree (growth|health) (declin|reduc))\\b",
 
   "Soil erosion & land degradation",
   "soil erosion; land degradation; desertification; loss of soil fertility/quality; gully erosion; topsoil loss",
@@ -1471,11 +1480,11 @@ impact_categories <- tribble(
 
   "Carbon storage & productivity decline",
   "NPP decline; reduced net primary productivity; soil carbon stocks decline; lower sequestration",
-  "(?i)\\b((net primary productivity|NPP) (declin|decreas|reduc)|soil carbon stocks? (declin|decreas|reduc)|carbon sequestration (declin|decreas|reduc))\\b",
+  "(?i)\\b((net primary productivity|NPP) (declin|decreas|reduc)|Net primary productivity|forest productivity|soil carbon stocks? (declin|decreas|reduc)|carbon sequestration (declin|decreas|reduc))\\b",
 
   "Coastal inundation & shoreline erosion",
   "coastal erosion/retreat; shoreline retreat; permanent inundation; coastal/storm-surge flooding; land loss to sea; tidal/nuisance flooding; below the high tide line",
-  "(?i)\\b(coastal (erosion|retreat|inundation|flood(ing)?)|shoreline (retreat|erosion)|beach (erosion|loss)|land loss (to|from) the sea|sea level|level of the sea|sea levels|coastal|sea level rise|permanent inundation|storm surge (inundation|flood(ing)?)|tidal flooding|nuisance flooding|below the high tide line)\\b",
+  "(?i)\\b(coastal (erosion|retreat|inundation|flood(ing)?)|shoreline (retreat|erosion)|beach (erosion|loss)|land loss (to|from) the sea|sea level|Sea-level rise|level of the sea|sea levels|coastal|sea level rise|permanent inundation|storm surge (inundation|flood(ing)?)|tidal flooding|nuisance flooding|below the high tide line)\\b",
 
   "Cryosphere degradation & ground instability",
   "permafrost thaw/degradation; active layer thickening; thermokarst; ground subsidence/instability; frost heave; glacier melt/retreat; reduced snow cover",
@@ -1488,15 +1497,15 @@ impact_categories <- tribble(
 
   "Agricultural pests & diseases",
   "crop pest/disease outbreaks;pest infestations;pests;alien species pathogen pressure; spread of pests; pest incidence; incidence/severity/spread; overwintering pests; higher pesticide use",
-  "(?i)\\b((crop|agricultur\\w*) (pest(s)?|disease(s)?|pathogen(s)?)( outbreak(s)?| incidence| incidences| occurrence(s)?| pressure| severity| spread)|overwintering (pests|insects)|alien species|pest|pests|higher pesticide use|pest|pests|pesticide (use|usage) (increase|rising|higher))\\b",
+  "(?i)\\b((crop|agricultur\\w*) (pest(s)?|disease(s)?|pathogen(s)?)( outbreak(s)?| incidence| incidences| occurrence(s)?| pressure| severity| spread)|overwintering (pests|insects)|invasion|alien species|pest|pests|higher pesticide use|pest|pests|pesticide (use|usage) (increase|rising|higher))\\b",
 
   "Agricultural system shifts",
   "growing season lengthened/shortened; earlier green-up; delayed senescence; planting boundary shifting northward/poleward/higher elevations;phenology; multi-cropping index rising;shift to higher elevations;shifting in agro-ecological zones;shifting in production zones;frost damage; cropping systems shifting",
-  "(?i)\\b(growing season (lengthen(?:ed|ing)?|shorten(?:ed|ing)?)|geographic distribution|shift to higher elevations|shifting in agro-ecological zones|shift|shifting|shift in production zones|phenological|earlier green[- ]?up|delayed senescence|planting boundary (shift(?:ing)?|moving) (northward|poleward|to higher (latitudes|altitudes|elevations))|multi-?cropping (index|area(s)?) (increase|rising|expanded)|cropping system(s)? (shift|change))\\b",
+  "(?i)\\b(growing season (lengthen(?:ed|ing)?|shorten(?:ed|ing)?)|climate suitability|phenology|geographic distribution|shift to higher elevations|shifting in agro-ecological zones|shift|shifting|shift in production zones|phenological|earlier green[- ]?up|delayed senescence|planting boundary (shift(?:ing)?|moving) (northward|poleward|to higher (latitudes|altitudes|elevations))|multi-?cropping (index|area(s)?) (increase|rising|expanded)|cropping system(s)? (shift|change))\\b",
 
 "Potential gains",
 "longer/extended growing season; increased crop yields/productivity/production; increased timber; increased NPP/biomass;attractive; multi-cropping index rising;increase crop yields;positive effect;beneficial;reduce heating demand; new species compositions improving services; reduced heating demand",
-"(?i)\\b((longer|extended|lengthen(?:ed|ing))\\s+growing\\s+season(s)?|increase(?:d|s|ing)\\s+(?:crop\\s+)?(?:yield(s)?|productivity|production)\\b(?![^.]{0,20}\\b(decreas|declin|loss|reduct))|increase(?:d|s|ing)\\s+(?:NPP|biomass|forest\\s+productivity|ecosystem\\s+productivity)\\b(?![^.]{0,20}\\b(decreas|declin|loss|reduct))|multi-?cropping\\s+index(es)?\\s+(?:increase|rising|higher)|new\\s+species\\s+composition(s)?\\s+(?:improv(?:e|ing)|enhanc(?:e|ing))\\s+ecosystem\\s+services|reduced\\s+heating\\s+demand|increase\\s+crop\\s+yields?|increase\\s+in\\s+the\\s+performance|increased\\s+availability\\s+of\\s+feed|expand\\s+the\\s+areas\\s+suitable\\s+for\\s+agriculture|increasing\\s+productivity|expansion\\s+of\\s+the\\s+crop\\s+production|increasing\\s+efficiency|facilitating\\s+access|reduction\\s+of\\s+energy\\s+consumption)\\b"
+"(?i)\\b((longer|extended|lengthen(?:ed|ing))\\s+growing\\s+season(s)?|increase(?:d|s|ing)\\s+(?:crop\\s+)?(?:yield(s)?|productivity|production)\\b(?![^.]{0,20}\\b(decreas|declin|loss|reduct))|increase(?:d|s|ing)\\s+(?:NPP|biomass|forest\\s+productivity|ecosystem\\s+productivity)\\b(?![^.]{0,20}\\b(decreas|declin|loss|reduct))|multi-?cropping\\s+index(es)?\\s+(?:increase|rising|higher)|new\\s+species\\s+composition(s)?\\s+(?:improv(?:e|ing)|enhanc(?:e|ing))\\s+ecosystem\\s+services|reduced\\s+heating\\s+demand|increase\\s+crop\\s+yields?|yield increasing|expand production|positive effects|increase\\s+in\\s+the\\s+performance|increased crop yields|increased\\s+availability\\s+of\\s+feed|expand\\s+the\\s+areas\\s+suitable\\s+for\\s+agriculture|increasing\\s+productivity|reduce heating demand|expansion\\s+of\\s+the\\s+crop\\s+production|increasing\\s+efficiency|facilitating\\s+access|reduction\\s+of\\s+energy\\s+consumption)\\b"
 )
 
 # --- Ensure every Keywords phrase is covered by the Regex for its category ---
@@ -1598,7 +1607,7 @@ message(sprintf("Impact categorization coverage: %.1f %%", 100 * coverage))
 # write_csv(adaptdata, "adaptdata_climate_impact_categorized.csv")
 
 # Quick export for spot-checking
-write.csv(adaptdata, "adaptdata_climateimpact5nano.csv", row.names = FALSE)
+write.csv(adaptdata, "adaptdata_climateimpact5nano_cat.csv", row.names = FALSE)
 
 
 ```
@@ -1606,6 +1615,10 @@ write.csv(adaptdata, "adaptdata_climateimpact5nano.csv", row.names = FALSE)
 ## 4.3 Climate impact summary data 
 
 ```{r,echo=FALSE}
+
+#load manualy checked data
+
+adaptdata <- read_csv("adaptdata_climateimpact5nano_manualcheck.csv")
 
 # 1. Filter and separate multiple SystemType values
 impact_counts <- adaptdata %>%
@@ -2156,7 +2169,7 @@ suppressPackageStartupMessages({
 })
 
 # Inputs (your filenames)
-path_ci        <- "adaptdata_climateimpact5nano.csv"   # has RowID, ImpactCategories, ClimateImpact_Keywords (authoritative)
+path_ci        <- "adaptdata_climateimpact5nano_manualcheck.csv"   # has RowID, ImpactCategories, ClimateImpact_Keywords (authoritative)
 path_actionlvl <- "adaptdata_action_level.csv"
 path_actiontyp <- "adaptdata_action_type.csv"
 path_results   <- "adaptdata_results.csv"              # has ResultType_GPT (and maybe ResultType_Manual)
@@ -2215,6 +2228,7 @@ actiontyp_out <- actiontyp %>%
   drop_cols(c("ImpactCategories","ClimateImpact_Keywords")) %>%
   left_join(map_ci, by = "RowID")
 
+
 # ---------- 2) Build “results-like” dataset = Action Type + ResultType_GPT ----------
 # Normalize and dedupe results to a key so we can join by text
 res_key <- results %>%
@@ -2249,6 +2263,7 @@ readr::write_csv(actiontyp_plus_results, "adaptdatafinal.csv")
 # --- Results: simple bar chart (Input / Process / Output / Outcome) ---
 
 RESULT_LABELS <- c("Input","Process","Output","Outcome")
+
 
 result_counts <- actiontyp_plus_results %>%
   filter(Element == "Result",
