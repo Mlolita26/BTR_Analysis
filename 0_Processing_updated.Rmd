@@ -218,7 +218,7 @@ for(type in names(haz_patterns)) {
 
 ## Coverage of hazard type 
 
-```{r}
+```{r,echo=FALSE}
 # Count number of 'Hazard' elements that received a HazardType
 assigned_hazards <- adaptdata %>%
   filter(Element == "Hazard" & HazardType != "") %>%
@@ -285,9 +285,58 @@ hazard_plot
 
 ```
 
+by regions 
+
+```{r,echo=FALSE}
+region_key <- overview %>%
+  select(Country, Region) %>%
+  distinct()
+
+adaptdata_with_region <- adaptdata %>%
+  left_join(region_key, by = "Country")
+
+hazard_counts <- adaptdata_with_region %>%
+  filter(Element == "Hazard") %>%
+  separate_rows(HazardType, sep = ";") %>%
+  filter(!is.na(HazardType), HazardType != "") %>%
+  count(Region, HazardType, sort = TRUE) %>%
+  rename(`Hazard Category` = HazardType,
+         Occurrences = n)
+
+ggplot(hazard_counts,
+       aes(x = reorder(`Hazard Category`, Occurrences),
+           y = Occurrences,
+           fill = Region)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  scale_fill_viridis_d(option = "plasma") +
+  labs(title = "Hazard categories by UNFCCC region",
+       x = NULL, y = "Occurrences") +
+  theme_minimal(base_size = 12) +
+  facet_wrap(~Region, scales = "free_y")
+
+ggplot(hazard_counts,
+       aes(x = reorder(`Hazard Category`, Occurrences),
+           y = Occurrences,
+           fill = Region)) +
+  geom_col(position = "stack") +   # stacked bars
+  coord_flip() +
+  scale_fill_viridis_d(option = "plasma") +
+  labs(title = "Hazard categories by UNFCCC region",
+       x = NULL, y = "Occurrences", fill = "Region") +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.y = element_text(size = 14),
+    axis.text.x = element_text(size = 14)
+  )
+
+
+
+```
+
 ## Hazard type raw data 
 
-```{r}
+```{r,echo=FALSE}
 # Load DT
 library(DT)
 
@@ -491,7 +540,7 @@ for(type in names(sys_patterns)) {
 
 ## Coverage of system at risk type 
 
-```{r}
+```{r,echo=FALSE}
 # Compute number of System at risk rows
 total_system_rows <- sum(adaptdata$Element == "System at risk", na.rm = TRUE)
 
@@ -549,6 +598,67 @@ system_plot <- ggplot(system_counts,
 system_plot
 
 
+```
+by regions 
+
+```{r,echo=FALSE}
+
+# --- 1. Add Region from overview ---
+region_key <- overview %>%
+  select(Country, Region) %>%
+  distinct()
+
+adaptdata_with_region <- adaptdata %>%
+  left_join(region_key, by = "Country")
+
+# --- 2. Filter + separate multiple SystemType values ---
+system_counts <- adaptdata_with_region %>%
+  filter(Element == "System at risk" & !is.na(SystemType) & SystemType != "") %>%
+  separate_rows(SystemType, sep = ";") %>%
+  count(Region, SystemType, sort = TRUE) %>%
+  rename(`System at Risk Category` = SystemType,
+         Occurrences = n)
+
+# --- 3. Table ---
+DT::datatable(
+  system_counts,
+  rownames = FALSE,
+  options = list(pageLength = 10, autoWidth = TRUE, dom = 'tip'),
+  caption = "Systems at risk by UNFCCC region"
+)
+
+write.csv(system_counts, "system_counts.csv", row.names = FALSE)
+
+# --- 4a. Facetted by region ---
+ggplot(system_counts,
+       aes(x = reorder(`System at Risk Category`, Occurrences),
+           y = Occurrences,
+           fill = Region)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  scale_fill_viridis_d(option = "plasma") +
+  labs(title = "Systems at risk by UNFCCC region (facetted)",
+       x = NULL, y = "Occurrences") +
+  theme_minimal(base_size = 12) +
+  facet_wrap(~Region, scales = "free_y")
+
+# --- 4b. Stacked bars by region ---
+ggplot(system_counts,
+       aes(x = reorder(`System at Risk Category`, Occurrences),
+           y = Occurrences,
+           fill = Region)) +
+  geom_col(position = "stack") +
+  coord_flip() +
+  scale_fill_viridis_d(option = "plasma") +
+  labs(title = "Systems at risk by UNFCCC region (stacked)",
+       x = NULL, y = "Occurrences", fill = "Region") +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.y = element_text(size = 14),
+    axis.text.x = element_text(size = 14)
+  )
+
+  
 ```
 
 ## System at risk type raw data 
@@ -937,7 +1047,7 @@ adaptdata <- adaptdata %>%
 
 ## Sector coverage 
 
-```{r}
+```{r,echo=FALSE}
 # Count rows classified under SectorType
 total_sector_rows <- sum(!is.na(adaptdata$Sector))
 classified_sector_rows <- sum(!is.na(adaptdata$SectorType))
@@ -1746,6 +1856,77 @@ system_plot
 
 
 ```
+by regions 
+
+```{r,echo=FALSE}
+
+region_key <- overview %>%
+  select(Country, Region) %>%
+  distinct()
+
+adaptdata_with_region <- adaptdata %>%
+  left_join(region_key, by = "Country")
+# 1. Filter and count as before
+impact_counts <- adaptdata_with_region %>%
+  filter(Element == "Climate impact",
+         !is.na(ImpactCategories),
+         str_detect(ImpactCategories, "\\S")) %>%
+  separate_rows(ImpactCategories, sep = ";") %>%
+  mutate(
+    ImpactCategories = str_replace_all(ImpactCategories, "\\p{Zs}+", " "),
+    ImpactCategories = str_squish(ImpactCategories)
+  ) %>%
+  filter(ImpactCategories != "") %>%
+  count(Region, ImpactCategories, sort = TRUE) %>%
+  rename(`Impact Category` = ImpactCategories,
+         Occurrences = n)
+
+# 2. Identify the top 15 categories overall
+top15_categories <- impact_counts %>%
+  group_by(`Impact Category`) %>%
+  summarise(total = sum(Occurrences), .groups = "drop") %>%
+  slice_max(order_by = total, n = 15) %>%
+  pull(`Impact Category`)
+
+# 3. Keep only those categories for plotting
+impact_top15 <- impact_counts %>%
+  filter(`Impact Category` %in% top15_categories)
+
+# 4. Interactive table (top 15 by region)
+DT::datatable(
+  impact_top15,
+  rownames = FALSE,
+  options = list(
+    pageLength = 15,
+    autoWidth = TRUE,
+    dom = 'tip'
+  )
+)
+
+# Optional: save
+write.csv(impact_top15, "impact_top15_by_region.csv", row.names = FALSE)
+
+# 5. Plot stacked bars (regions as colors)
+impact_plot <- ggplot(impact_top15,
+       aes(x = reorder(`Impact Category`, Occurrences, FUN = sum),
+           y = Occurrences,
+           fill = Region)) +
+  geom_col(position = "stack") +
+  coord_flip() +
+  scale_fill_viridis_d(option = "plasma") +
+  labs(title = "Top 15 Climate impacts by UNFCCC region",
+       x = NULL, y = "Occurrences", fill = "Region") +
+  theme_minimal(base_size = 10) +
+  theme(
+    axis.text.y = element_text(size = 10),
+    axis.text.x = element_text(size = 10)
+  )
+
+impact_plot
+
+```
+
+
 # Step 4.5 : Raw data 
 
 This show 10 random rows for each climate impact categories. The raw text is included as well as the keywords that justifiy the category. 
@@ -2156,8 +2337,62 @@ type_plot
 
 ```
 
+```{r,echo=FALSE}
+# 0. Join Region from overview
+region_key <- overview %>%
+  select(Country, Region) %>%
+  distinct()
 
-```{r}
+adaptdata_with_region <- adaptdata %>%
+  left_join(region_key, by = "Country")
+
+# 1. Normalize tokens
+.norm_tok <- function(x) {
+  x %>% str_replace_all("\\p{Zs}+", " ") %>% str_squish()
+}
+
+# 2. Count Action Types by Region
+type_counts <- adaptdata_with_region %>%
+  filter(grepl("^\\s*action\\s*$", Element, ignore.case = TRUE),
+         !is.na(InterventionType_GPT),
+         str_detect(InterventionType_GPT, "\\S")) %>%
+  separate_rows(InterventionType_GPT, sep = ";") %>%        # split multi-labels
+  mutate(InterventionType_GPT = .norm_tok(InterventionType_GPT)) %>%
+  filter(InterventionType_GPT != "") %>%
+  count(Region, InterventionType_GPT, sort = TRUE) %>%
+  rename(`Action Type` = InterventionType_GPT,
+         Occurrences = n)
+
+# 3. Interactive datatable
+DT::datatable(
+  type_counts,
+  rownames = FALSE,
+  options = list(pageLength = 10, autoWidth = TRUE, dom = 'tip'),
+  caption = "🏷️ Action Type — counts by Region"
+)
+
+# Optional export
+write.csv(type_counts, "action_type_counts_by_region.csv", row.names = FALSE)
+
+# 4. Plot stacked bars (regions as color)
+type_plot <- ggplot(type_counts,
+  aes(x = reorder(`Action Type`, Occurrences, FUN = sum),
+      y = Occurrences,
+      fill = Region)) +
+  geom_col(position = "stack") +
+  coord_flip() +
+  scale_fill_viridis_d(option = "plasma") +
+  labs(title = "Action Type by UNFCCC region",
+       x = NULL, y = "Occurrences", fill = "Region") +
+  theme_minimal(base_size = 10) +
+  theme(axis.text.y = element_text(size = 10),
+        axis.text.x = element_text(size = 10))
+
+type_plot
+
+```
+
+```{r,echo=FALSE}
 type_counts <- adaptdata %>%
   filter(grepl("^\\s*action\\s*$", Element, ignore.case = TRUE),
          !is.na(ActionType_GPT),
@@ -2194,6 +2429,66 @@ type_plot
 
 
 ```
+
+by regions
+
+```{r,echo=FALSE}
+
+# 0. Join Region info
+region_key <- overview %>%
+  select(Country, Region) %>%
+  distinct()
+
+adaptdata_with_region <- adaptdata %>%
+  left_join(region_key, by = "Country")
+
+# 1. Normalize tokens
+.norm_tok <- function(x) {
+  x %>% str_replace_all("\\p{Zs}+", " ") %>% str_squish()
+}
+
+# 2. Count Action Types by Region
+type_counts <- adaptdata_with_region %>%
+  filter(grepl("^\\s*action\\s*$", Element, ignore.case = TRUE),
+         !is.na(ActionType_GPT),
+         str_detect(ActionType_GPT, "\\S")) %>%
+  separate_rows(ActionType_GPT, sep = ";") %>%
+  mutate(ActionType_GPT = .norm_tok(ActionType_GPT)) %>%
+  filter(ActionType_GPT != "") %>%
+  count(Region, ActionType_GPT, sort = TRUE) %>%
+  rename(`Action Type` = ActionType_GPT,
+         Occurrences = n)
+
+# 3. Interactive datatable
+DT::datatable(
+  type_counts,
+  rownames = FALSE,
+  options = list(pageLength = 10, autoWidth = TRUE, dom = 'tip'),
+  caption = "🏷️ Action Type — counts by Region"
+)
+
+# Save output
+write.csv(type_counts, "action_type_gpt_counts_by_region.csv", row.names = FALSE)
+
+
+# 4. Stacked bar plot (region colors)
+type_plot <- ggplot(type_counts,
+  aes(x = reorder(`Action Type`, Occurrences, FUN = sum),
+      y = Occurrences,
+      fill = Region)) +
+  geom_col(position = "stack") +
+  coord_flip() +
+  scale_fill_viridis_d(option = "plasma") +
+  labs(title = "Action Type (GPT) by UNFCCC region",
+       x = NULL, y = "Occurrences", fill = "Region") +
+  theme_minimal(base_size = 12) +
+  theme(axis.text.y = element_text(size = 10),
+        axis.text.x = element_text(size = 10))
+
+type_plot
+
+```
+
 ## Action type data 
 ```{r,echo=FALSE}
 
@@ -2443,6 +2738,66 @@ donut
 
 
 ```
+by regions 
+
+```{r,echo=FALSE}
+# --- Bring Region onto adaptdata ---
+region_key <- overview %>%
+  dplyr::select(Country, Region) %>%
+  dplyr::distinct()
+
+adaptdata_with_region <- adaptdata %>%
+  dplyr::left_join(region_key, by = "Country") %>%
+  dplyr::mutate(Region = dplyr::coalesce(Region, "Unknown"))
+
+# --- Counts by Region x Action Level ---
+level_counts_region <- adaptdata_with_region %>%
+  dplyr::filter(grepl("^\\s*action\\s*$", Element, ignore.case = TRUE),
+                !is.na(ActionLevel_GPT),
+                stringr::str_detect(ActionLevel_GPT, "\\S")) %>%
+  dplyr::count(Region, ActionLevel_GPT, name = "Occurrences") %>%
+  dplyr::mutate(ActionLevel_GPT = factor(ActionLevel_GPT, 
+                                         levels = c("Groundwork","Substantive action")))
+
+# --- Stacked bars: one bar per Region; colors = Action Level (counts) ---
+level_plot_region_counts <- ggplot(
+  level_counts_region,
+  aes(x = reorder(Region, Occurrences, FUN = sum),
+      y = Occurrences,
+      fill = ActionLevel_GPT)
+) +
+  geom_col(position = "stack") +
+  coord_flip() +
+  scale_fill_viridis_d(option = "plasma", name = "Action Level") +
+  labs(title = "Action level by UNFCCC region (stacked counts)",
+       x = NULL, y = "Occurrences") +
+  theme_minimal(base_size = 12) +
+  theme(axis.text.y = element_text(size = 13),
+        axis.text.x = element_text(size = 12))
+
+level_plot_region_counts
+
+# --- Optional: proportional shares per Region ---
+level_plot_region_share <- ggplot(
+  level_counts_region,
+  aes(x = reorder(Region, Occurrences, FUN = sum),
+      y = Occurrences,
+      fill = ActionLevel_GPT)
+) +
+  geom_col(position = "fill") +
+  coord_flip() +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_viridis_d(option = "plasma", name = "Action Level") +
+  labs(title = "Action level by UNFCCC region (share within region)",
+       x = NULL, y = "Share") +
+  theme_minimal(base_size = 12) +
+  theme(axis.text.y = element_text(size = 13),
+        axis.text.x = element_text(size = 12))
+
+# level_plot_region_share
+level_plot_region_share
+
+```
 
 ```{r,echo=FALSE}
 #---- Preview: Action level (only relevant columns) ----
@@ -2676,7 +3031,121 @@ p_results <- ggplot(result_counts,
 p_results
 ```
 
+by regions 
+
+```{r,echo=FALSE}
+# --- Add Region onto adaptdata ---
+region_key <- overview %>%
+  dplyr::select(Country, Region) %>%
+  dplyr::distinct()
+
+adaptdata_with_region <- adaptdata %>%
+  dplyr::left_join(region_key, by = "Country") %>%
+  dplyr::mutate(Region = dplyr::coalesce(Region, "Unknown"))
+
+RESULT_LABELS <- c("Input","Process","Output","Outcome","Impact")
+
+
+# --- Canonicalize + count by Region x Result type ---
+result_counts_region <- adaptdata_with_region %>%
+  dplyr::filter(Element == "Result",
+                !is.na(ResultType_GPT),
+                nzchar(ResultType_GPT)) %>%
+  dplyr::mutate(ResultType_GPT = stringr::str_squish(ResultType_GPT)) %>%
+  dplyr::mutate(ResultType_GPT = sapply(ResultType_GPT, function(t) {
+    hit <- RESULT_LABELS[tolower(RESULT_LABELS) == tolower(t)]
+    ifelse(length(hit), hit, NA_character_)
+  })) %>%
+  dplyr::filter(!is.na(ResultType_GPT)) %>%
+  dplyr::mutate(ResultType_GPT = factor(ResultType_GPT, levels = RESULT_LABELS)) %>%
+  dplyr::count(Region, ResultType_GPT, name = "Occurrences")
+
+# --- Stacked bars (counts): colors = Region, one bar per Result type ---
+p_results_region_counts <- ggplot(
+  result_counts_region,
+  aes(x = ResultType_GPT, y = Occurrences, fill = Region)
+) +
+  geom_col(position = "stack", width = 0.75) +
+  coord_flip() +
+  scale_fill_viridis_d(option = "plasma", name = "Region") +
+  labs(title = "Result types by UNFCCC region (stacked counts)",
+       x = NULL, y = "Occurrences") +
+  theme_minimal(base_size = 12) +
+  theme(axis.text.y = element_text(size = 13),
+        axis.text.x = element_text(size = 12))
+
+p_results_region_counts
+
+# --- Optional: proportional shares within each Result type ---
+p_results_region_share <- ggplot(
+  result_counts_region,
+  aes(x = ResultType_GPT, y = Occurrences, fill = Region)
+) +
+  geom_col(position = "fill", width = 0.75) +
+  coord_flip() +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_viridis_d(option = "plasma", name = "Region") +
+  labs(title = "Result types by UNFCCC region (share within type)",
+       x = NULL, y = "Share") +
+  theme_minimal(base_size = 12) +
+  theme(axis.text.y = element_text(size = 13),
+        axis.text.x = element_text(size = 12))
+
+# p_results_region_share
+
+p_results_region_share
+```
+
 # Step 7 : Adaptation priorities
+
+List of adaptation priorities : 
+- **Water use efficiency & demand management** — Reduce water losses and improve irrigation efficiency/productivity.  
+- **Alternative & non-conventional water resources** — Options like rainwater harvesting, greywater reuse, desalination, and storage.  
+- **Agribusiness enhancement & private sector development** — Strengthening agribusinesses, value chains, and SME/market linkages.  
+- **Legal, policy & institutional frameworks** — Laws, policies, governance, and institutional capacity for adaptation.  
+- **Climate-smart agriculture (CSA) & resilient farming systems** — Practices like crop diversification, agroforestry, and soil management.  
+- **Sustainable land & farm management** — Sustainable land practices, organic/landscape approaches.  
+- **Climate-resilient crops & seeds** — Breeding and access to drought/heat/pest-resistant varieties and seeds.  
+- **Farmer capacity, extension & knowledge services** — Training, extension services, and farmer knowledge exchange.  
+- **Agricultural water management** — On-farm water efficiency, watershed management, and irrigation.  
+- **Rural development & livelihood diversification** — Enhancing rural infrastructure, markets, and income sources.  
+- **Ecosystem protection, restoration & protected areas** — Conserving and restoring ecosystems and biodiversity.  
+- **Combat land degradation & desertification** — Tackling soil erosion, fertility loss, and desertification.  
+- **Afforestation, reforestation & carbon sinks** — Tree planting and forest cover expansion for carbon sequestration.  
+- **Invasive species management** — Control and management of invasive alien species.  
+- **Land-use & spatial planning integration** — Adaptation in zoning, territorial, and land-use planning.  
+- **Monitoring, data & hydrological observation** — Climate monitoring, data systems, and hydrological observation.  
+- **National adaptation frameworks & strategies** — National-level plans/frameworks (e.g., NAP, NCCAS).  
+- **Local adaptation capacity & community empowerment** — Community-based adaptation and local empowerment.  
+- **Public awareness, education & engagement** — Campaigns, curricula, and awareness programs.  
+- **Institutional & technical capacity building** — Training, institutional strengthening, inter-agency coordination.  
+- **Policy mainstreaming & regulatory integration** — Integrating adaptation into policies and regulations.  
+- **Cross-sectoral collaboration & partnerships** — Partnerships and coordination across sectors.  
+- **Data management, knowledge & information services** — Knowledge management, sharing, and tools.  
+- **Evidence base, risk & impact assessments** — Vulnerability, risk, and impact assessments.  
+- **Subnational adaptation priorities & sector packages** — Region- or sector-specific strategies and action packages.  
+- **Agro-meteorological & climate information services** — Forecasts, advisories, and information services for agriculture.  
+- **Post-harvest, food loss reduction & risk transfer** — Reducing losses, value addition, insurance, and cold chains.  
+- **Climate-resilient livestock systems** — Livestock management, resilient breeds, and animal health.  
+- **Research, innovation & investment (agri/health)** — Research, technology, and innovation in agriculture and health.  
+- **Fire management & response capability** — Fire prevention, management, and emergency response.  
+- **Community-based forest management & re/afforestation** — Local forest management and reforestation.  
+- **Biodiversity assessment & monitoring** — Biodiversity inventories, monitoring, and assessments.  
+- **Public health: surveillance, systems & workforce** — Disease surveillance, early warning, and health workforce.  
+- **Public health infrastructure & services** — Facilities, WASH, energy, and resilient health services.  
+- **Urban climate resilience & planning** — Climate-proofed urban planning and infrastructure.  
+- **Urban green/blue infrastructure & heat mitigation** — Greening, cooling, water-sensitive infrastructure.  
+- **Disaster risk reduction, EWS & emergency management** — DRR, early warning systems, and emergency response.  
+- **Energy & grid resilience** — Strengthening energy infrastructure and supply chains.  
+- **Coastal & marine ecosystem protection/restoration** — Mangroves, reefs, wetlands, and coastal restoration.  
+- **Agricultural resource efficiency & high-standard farmland** — Efficient farmland, fertilizer, and input use.  
+- **Water allocation, security & quantified targets** — Ensuring water security with defined consumption/coverage targets.  
+- **Transport infrastructure & services adaptation** — Climate-proofing roads, ports, rail, and mobility.  
+- **Industry & mining adaptation** — Industrial resilience and climate-compatible mining.  
+- **Sectoral adaptation plans & guidelines** — Guidelines and action plans for specific sectors (e.g., tourism).  
+- **Finance, insurance & social protection** — Climate finance, insurance, and social safety nets.  
+- **Tourism sector adaptation** — Adaptation strategies for tourism and ecotourism.  
+- **Gender & social inclusion** — Gender-sensitive and socially inclusive adaptation approaches.  
 
 ```{r,echo=FALSE}
 
@@ -2746,6 +3215,10 @@ priority_categories <- tribble(
   "Alternative & non-conventional water resources",
   "rainwater harvesting; stormwater harvesting; water harvesting; water storage; storage tanks; cisterns; greywater/graywater reuse; recycled water; wastewater reuse; desalination; managed aquifer recharge; artificial recharge; emergency backup water sources; household storage",
   "(?i)\\b(rain\\s*water\\s*harvest(?:ing)?|storm\\s*water\\s*harvest(?:ing)?|water\\s+harvest(?:ing)?|water\\s+storage|storage\\s+tanks?|cisterns?|grey\\s*water|gray\\s*water|recycl(?:ed|ing)\\s+water|waste\\s*water\\s+reus(?:e|ing)|desalinat(?:e|ion)|managed\\s+aquifer\\s+recharge|artificial\\s+recharge|backup\\s+water\\s+source(?:s)?|household\\s+storage)\\b",
+  
+  "Agribusiness enhancement & private sector development",
+    "agribusiness enhancement; agribusiness development; agro-processing; agroindustry; agrifood sector; value addition; value-chain upgrading; contract farming; outgrower schemes; SME support; enterprise development; market linkages; business incubation",
+    "(?i)\\b(agri[-\\s]?business(?:es)?\\s*(?:enhance(?:ment|d))?|agri[-\\s]?business(?:es)?|agro[-\\s]?processing|agro[-\\s]?industry|agrifood\\s+(?:sector|industry)|value\\s+addition|value[-\\s]?chain\\s+(?:upgrade|upgrading|development|enhancement|strengthening)|market\\s+linkages?|contract\\s+farming|out[-\\s]?grower(?:\\s+schemes?)?|SMEs?\\s+(?:support|financing|development)|enterprise\\s+development|business\\s+incubators?)\\b",
 
   "Legal, policy & institutional frameworks",
   "legal framework; regulation; legislation; policy; governance; enforcement; institutional capacity; coordination; mainstreaming adaptation; codes; guidelines",
@@ -2759,7 +3232,7 @@ priority_categories <- tribble(
   "sustainable farming practices; sustainable land management; landscape-based organic farming; integrated agriculture landscape systems; integrated landscape",
   "(?i)\\b(sustainable\\s+(?:farming|agricult\\w*|land\\s+management)|SLM\\b|landscape[-\\s]?based\\s+organic\\s+farming|integrated\\s+(?:agricultur(?:e|al)\\s+)?landscape\\s+system(?:s)?|integrated\\s+landscape)\\b",
 
-  "Climate-resilient crops & access to resilient seeds",
+  "Climate-resilient crops & access to resilient seeds and breeds",
   "climate-resilient crop varieties; drought/heat/pest tolerant crops; access to resilient seeds; seed systems",
   "(?i)\\b(resilien\\w+\\s+(?:crops?|variet(?:y|ies))|toleran\\w+\\s+(?:drought|heat|pests?)|resilien\\w+\\s+seed(?:s)?|seed\\s+system(?:s)?)\\b",
 
@@ -2849,7 +3322,7 @@ priority_categories <- tribble(
 
   "Research, innovation & investment (agri/health)",
   "investment in research; research and innovation; technology development; technology transfer; telemedicine; scientific support; technical support",
-  "(?i)\\b(invest(?:ment)?\\s+in\\s+research|research\\s+and\\s+innovation|technology\\s+(?:development|transfer)|telemedicine|scientific\\s+support|technical\\s+support)\\b",
+  "(?i)\\b(invest(?:ment)?\\s+in\\s+research|research\\s+and\\s+innovation|technology\\s+(?:development|transfer)|telemedicine|scientific\\s+support|technical\\s+support|new technologies)\\b",
 
   "Fire management & response capability",
   "adaptive fire management; reduce causes of forest fires; response capability; prescribed burning; incident management training; local forest plans",
@@ -2995,7 +3468,88 @@ adaptdata <- adaptdata %>%
 ```
 
 
+
+by regions
+
 ```{r}
+library(dplyr)
+library(stringr)
+library(tidyr)
+library(ggplot2)
+library(DT)
+
+
+region_key <- overview %>%
+  select(Country, Region) %>%
+  distinct()
+
+adaptdata_with_region <- adaptdata %>%
+  left_join(region_key, by = "Country")
+
+# 1) Counts by Region x Priority
+priority_counts_region <- adaptdata_with_region %>%
+  filter(tolower(Element) == "adaptation priorities",
+         !is.na(PriorityCategories),
+         str_detect(PriorityCategories, "\\S")) %>%
+  separate_rows(PriorityCategories, sep = ";") %>%
+  mutate(
+    PriorityCategories = str_squish(PriorityCategories),
+    Region = if_else(is.na(Region) | !nzchar(Region), "Unknown", Region)
+  ) %>%
+  filter(PriorityCategories != "") %>%
+  count(Region, PriorityCategories, sort = TRUE) %>%
+  rename(`Priority Category` = PriorityCategories,
+         Occurrences = n)
+
+# 2) Pick TOP 20 categories by total across regions
+top20 <- priority_counts_region %>%
+  group_by(`Priority Category`) %>%
+  summarise(Total = sum(Occurrences), .groups = "drop") %>%
+  slice_max(Total, n = 20, with_ties = FALSE)
+
+priority_counts_region_top20 <- priority_counts_region %>%
+  semi_join(top20, by = "Priority Category") %>%
+  left_join(top20, by = "Priority Category") %>%
+  mutate(`Priority Category` = reorder(`Priority Category`, Total)) %>%
+  arrange(Total)
+
+# 3) Stacked plot by Region (top 20 only)
+priority_plot_region <- ggplot(priority_counts_region_top20,
+  aes(x = `Priority Category`, y = Occurrences, fill = Region)) +
+  geom_col(position = "stack") +
+  coord_flip() +
+  scale_fill_viridis_d(option = "plasma", name = "Region") +
+  labs(title = "Top 20 adaptation priorities by UNFCCC region (stacked)",
+       x = NULL, y = "Occurrences") +
+  theme_minimal(base_size = 10)
+
+priority_plot_region
+
+
+
+```
+
+```{r,echo=FALSE}
+library(tidyr)
+
+priority_table_region <- priority_counts_region %>%
+  pivot_wider(
+    names_from = Region,
+    values_from = Occurrences,
+    values_fill = 0
+  ) %>%
+  arrange(desc(rowSums(across(where(is.numeric)))))
+
+DT::datatable(
+  priority_table_region,
+  rownames = FALSE,
+  options = list(
+    pageLength = 15,
+    autoWidth = TRUE,
+    dom = 'tip'
+  ),
+  caption = "📊 Adaptation priorities by UNFCCC region"
+)
 
 ```
 
@@ -3090,9 +3644,6 @@ adaptdata <- adaptdata %>%
 #   select(-c("...1","...2","...3","...4","ResultType","ResultType_Manual"))
 # 
 # readr::write_csv(actiontyp_plus_results, "adaptdatafinal.csv")
-
-
-
 
 
 ```
