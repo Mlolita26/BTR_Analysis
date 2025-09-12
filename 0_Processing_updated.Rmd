@@ -2245,7 +2245,129 @@ Action Level classification
 - If no clear match, the model returns `NA`.  
 - The result is stored in `ActionLevel_GPT` and previewed in a datatable.  
 
+```{r, echo=FALSE, eval=FALSE}
 
+# adaptdata<-read.csv("adaptadata_action_type_nano6.csv")
+# # ---- Config ----
+# ACT_LEVEL_MODEL <- "gpt-5-nano"
+# CHUNK_SIZE <- 30
+# 
+# # ---- Allowed labels ----
+# ACTION_LEVEL_LABELS <- c("Groundwork", "Substantive action")
+# 
+# # ---- Canonicalizer (robust to case/punct/variants) ----
+# canonicalize_action_level <- function(x) {
+#   if (is.null(x) || is.na(x)) return(NA_character_)
+#   raw <- tolower(trimws(x))
+#   raw <- gsub("[[:punct:]]+$", "", raw)
+#   raw <- gsub("\\s+", " ", raw)
+# 
+#   if (raw %in% c("groundwork")) return("Groundwork")
+#   if (raw %in% c("substantive action","substantive actions","substantive-action")) return("Substantive action")
+# 
+#   hit <- ACTION_LEVEL_LABELS[tolower(ACTION_LEVEL_LABELS) == raw]
+#   if (length(hit)) return(hit)
+#   NA_character_
+# }
+# 
+# # ---- Batch prompt (mirrors intervention_type style) ----
+# make_action_level_batch_prompt <- function(txts) {
+#   glue::glue(
+# "Task: For each passage, assign exactly ONE *Action level* label from the list below.
+# Return N lines, one per input, in the same order. Output only the label string.
+# 
+# Allowed labels:
+# - Groundwork — preparatory/abstract work (e.g., scenarios, impact/vulnerability assessment, conceptual tools, policy recommendations/planning).
+# - Substantive action — concrete adaptation actions (e.g., organizational development, regulations, outreach/capacity building/education, surveillance/monitoring/MEL, infrastructure/technology/innovation, resource transfer/financial mechanisms, funding/financing/co-financing, behavior change, M&E, adoption of technologies).
+# 
+# Rules:
+# - Think silently; do NOT explain your reasoning.
+# - Output exactly one of: Groundwork | Substantive action
+# - If none fit, output NA.
+# 
+# INPUTS (numbered):
+# {paste0(sprintf('%d) %s', seq_along(txts), txts), collapse = '\n')}"
+#   )
+# }
+# 
+# # ---- Batch classifier (single prompt per chunk) ----
+# classify_action_level_batch <- function(txts, model = ACT_LEVEL_MODEL, chunk_size = CHUNK_SIZE) {
+#   if (!length(txts)) return(character(0))
+#   chat <- ellmer::chat_openai(model = model)
+#   out  <- vector("character", length(txts))
+# 
+#   idx <- seq_along(txts)
+#   chunks <- split(idx, ceiling(idx / chunk_size))
+# 
+#   pb <- txtProgressBar(min = 0, max = length(chunks), style = 3)
+#   on.exit(close(pb), add = TRUE)
+# 
+#   for (i in seq_along(chunks)) {
+#     ids <- chunks[[i]]
+#     prompt <- make_action_level_batch_prompt(txts[ids])
+# 
+#     ans <- tryCatch(chat$chat(prompt), error = function(e) e)
+#     if (inherits(ans, "error")) {
+#       warning("GPT batch failed: ", conditionMessage(ans), " — assigning NA for this chunk.")
+#       out[ids] <- NA_character_
+#       setTxtProgressBar(pb, i); next
+#     }
+# 
+#     # Expect one label per line; trim; strip accidental numbering if present
+#     lines <- strsplit(ans, "\\r?\\n", perl = TRUE)[[1]]
+#     lines <- trimws(lines)
+#     lines <- lines[nzchar(lines)]
+#     lines <- sub("^[0-9]+[.)\\-:]\\s*", "", lines, perl = TRUE)
+# 
+#     # Align with input length
+#     if (length(lines) < length(ids)) lines <- c(lines, rep(NA_character_, length(ids) - length(lines)))
+#     if (length(lines) > length(ids)) lines <- lines[seq_along(ids)]
+# 
+#     # Canonicalize
+#     out[ids] <- vapply(lines, canonicalize_action_level, character(1))
+#     setTxtProgressBar(pb, i)
+#   }
+# 
+#   out
+# }
+# 
+# # ---- Run on Action rows (BATCH) ----
+# if (!"ActionLevel_GPT" %in% names(adaptdata)) adaptdata$ActionLevel_GPT <- NA_character_
+# 
+# act_idx <- which(grepl("^\\s*action\\s*$", adaptdata$Element, ignore.case = TRUE))
+# if (length(act_idx)) {
+#   cat("Classifying Action level for", length(act_idx), "rows in batches...\n")
+#   adaptdata$ActionLevel_GPT[act_idx] <-
+#     classify_action_level_batch(adaptdata$ElementText[act_idx],
+#                                 model = ACT_LEVEL_MODEL,
+#                                 chunk_size = CHUNK_SIZE)
+# } else {
+#   cat("No rows with Element == 'Action' found.\n")
+# }
+# 
+# # ---- Preview ----
+# preview_level <- adaptdata %>%
+#   filter(grepl("^\\s*action\\s*$", Element, ignore.case = TRUE)) %>%
+#   transmute(
+#     Country, Document,
+#     ElementText = ifelse(is.na(ElementText), "",
+#                          ifelse(nchar(ElementText) > 120,
+#                                 paste0("<span title='", ElementText, "'>", substr(ElementText, 1, 120), "...</span>"),
+#                                 ElementText)),
+#     ActionLevel_GPT
+#   )
+# 
+# DT::datatable(
+#   preview_level, escape = FALSE,
+#   caption = glue::glue(":compass: Action level (Groundwork vs Substantive) — GPT (batched, {CHUNK_SIZE} per request)"),
+#   options = list(pageLength = 10, autoWidth = TRUE, dom = "tip")
+# )
+# 
+
+# Optional export
+#write.csv(preview_level, "action_level_gpt_preview.csv", row.names = FALSE)
+#write.csv(adaptdata,"adaptdata_action_level_nano6.csv")
+```
 
 
 ```{r,echo=FALSE}
@@ -2374,31 +2496,27 @@ DT::datatable(
 
 ```{r,echo=FALSE,}
 
-#adaptdata <- read_csv("adaptdata_action_type.csv")
-# #========================= Step X: Result Type (GPT) =========================
-# #Goal now: store EXACT GPT output in ResultType_GPT (no normalization/cleanup)
+# adaptdata <- read_csv("adaptadata_action_type_nano6.csv")
+# 
 # 
 # suppressPackageStartupMessages({
-#   library(dplyr)
-#   library(stringr)
-#   library(glue)
-#   library(DT)
-#   library(ellmer)
+#   library(dplyr); library(stringr); library(glue); library(DT); library(ellmer)
 # })
 # 
-# # ---- API key: FORCE using BTR_KEY this session ----
+# # ---- API key (same as before) ----
 # btr_key <- Sys.getenv("BTR_KEY")
 # stopifnot("BTR_KEY is not set in your environment." = nzchar(btr_key))
-# Sys.setenv(OPENAI_API_KEY = btr_key)  # ellmer reads OPENAI_API_KEY
+# Sys.setenv(OPENAI_API_KEY = btr_key)
 # 
-# # ---- Model ----
+# # ---- Model / batching ----
 # RESULT_MODEL <- "gpt-5-nano"
+# CHUNK_SIZE   <- 30
 # 
-# # ---- Prompt builder (unchanged, but we will store raw model output) ----
-# # Updated, precise prompt for Result Type (single-label)
-# make_result_prompt <- function(txt) {
+# # ---- Batch prompt (same content as your single-item prompt) ----
+# make_result_batch_prompt <- function(txts) {
 #   glue::glue(
-# "Classify the passage by the *type of results* it reports. Choose EXACTLY ONE label.
+# "Classify each passage by the *type of results* it reports. Choose EXACTLY ONE label per passage.
+# Return N lines, one per input, in the same order. Output only the label string.
 # 
 # Allowed labels (use these exact words only):
 # - Input — resources needed to implement an adaptation action (e.g., finance amounts; staff counts; tools/data/analyses/maps prepared).
@@ -2429,80 +2547,462 @@ DT::datatable(
 # - Return ONLY one of: Input | Process | Output | Outcome | Impact | NA
 # - No extra words or punctuation.
 # 
-# TEXT:
-# \"\"\"{txt}\"\"\""
+# INPUTS (numbered):
+# {paste0(sprintf('%d) %s', seq_along(txts), txts), collapse = '\n')}"
 #   )
 # }
 # 
+# # ---- Batch classifier (stores VERBATIM labels) ----
+# classify_result_type_batch <- function(txts, model = RESULT_MODEL, chunk_size = CHUNK_SIZE) {
+#   if (!length(txts)) return(character(0))
+#   chat <- ellmer::chat_openai(model = model)
+#   out  <- vector("character", length(txts))
 # 
-# # ---- Raw classifier: returns EXACT text from GPT (no trimming/canonization) ----
-# classify_result_types_raw <- function(txt, model = RESULT_MODEL) {
-#   if (is.na(txt) || !nzchar(txt)) return(NA_character_)
-#   prompt <- make_result_prompt(txt)
+#   idx    <- seq_along(txts)
+#   chunks <- split(idx, ceiling(idx / chunk_size))
 # 
-#   ans <- tryCatch(
-#     ellmer::chat_openai(model = model)$chat(prompt),
-#     error = function(e) e
-#   )
-#   if (inherits(ans, "error")) {
-#     warning("GPT call failed: ", conditionMessage(ans))
-#     return(NA_character_)
+#   pb <- txtProgressBar(min = 0, max = length(chunks), style = 3)
+#   on.exit(close(pb), add = TRUE)
+# 
+#   for (i in seq_along(chunks)) {
+#     ids    <- chunks[[i]]
+#     prompt <- make_result_batch_prompt(txts[ids])
+# 
+#     ans <- tryCatch(chat$chat(prompt), error = function(e) e)
+#     if (inherits(ans, "error")) {
+#       warning("GPT batch failed: ", conditionMessage(ans), " — assigning NA for this chunk.")
+#       out[ids] <- NA_character_
+#       setTxtProgressBar(pb, i); next
+#     }
+# 
+#     # one label per line; strip accidental numbering; keep label text VERBATIM
+#     lines <- strsplit(ans, "\\r?\\n", perl = TRUE)[[1]]
+#     lines <- trimws(lines)
+#     lines <- lines[nzchar(lines)]
+#     lines <- sub("^[0-9]+[.)\\-:]\\s*", "", lines, perl = TRUE)
+# 
+#     # align to input size
+#     if (length(lines) < length(ids)) lines <- c(lines, rep(NA_character_, length(ids) - length(lines)))
+#     if (length(lines) > length(ids)) lines <- lines[seq_along(ids)]
+# 
+#     out[ids] <- lines
+#     setTxtProgressBar(pb, i)
 #   }
-# 
-#   # Store *exactly* what the model returned
-#   as.character(ans)
+#   out
 # }
 # 
-# # ---- Run on Element == "Result" (store raw output) ----
+# # ---- Run on Element == "Result" (batched) ----
 # if (!"ResultType_GPT" %in% names(adaptdata)) adaptdata$ResultType_GPT <- NA_character_
 # 
 # res_idx <- which(grepl("^\\s*result\\s*$", adaptdata$Element, ignore.case = TRUE))
-# 
 # if (length(res_idx)) {
-#   cat("Classifying", length(res_idx), "rows where Element == 'Result'...\n")
-#   pb <- txtProgressBar(min = 0, max = length(res_idx), style = 3)
-# 
-#   for (i in seq_along(res_idx)) {
-#     r <- res_idx[i]
-#     txt <- adaptdata$ElementText[r]
-#     adaptdata$ResultType_GPT[r] <- classify_result_types_raw(txt)
-#     setTxtProgressBar(pb, i)
-#   }
-#   close(pb)
+#   cat("Classifying result type for", length(res_idx), "rows (batched)...\n")
+#   adaptdata$ResultType_GPT[res_idx] <-
+#     classify_result_type_batch(adaptdata$ElementText[res_idx],
+#                                model = RESULT_MODEL,
+#                                chunk_size = CHUNK_SIZE)
 # } else {
 #   cat("No rows with Element == 'Result' found.\n")
 # }
 # 
-# # ---- Quick preview + export (shows EXACT GPT text) ----
+# # ---- Preview (verbatim) + export ----
 # result_preview <- adaptdata %>%
 #   filter(grepl("^\\s*result\\s*$", Element, ignore.case = TRUE)) %>%
 #   transmute(
-#     Country,
-#     Document,
-#     ElementText = ifelse(
-#       is.na(ElementText), "",
-#       ifelse(nchar(ElementText) > 120,
-#              paste0("<span title='", ElementText, "'>", substr(ElementText, 1, 120), "...</span>"),
-#              ElementText)
-#     ),
-#     ResultType_Manual = ResultType,
-#     ResultType_GPT    = ResultType_GPT  # raw GPT output
+#     Country, Document,
+#     ElementText = ifelse(is.na(ElementText), "",
+#                          ifelse(nchar(ElementText) > 120,
+#                                 paste0("<span title='", ElementText, "'>", substr(ElementText, 1, 120), "...</span>"),
+#                                 ElementText)),
+#     ResultType_GPT
 #   )
 # 
+# DT::datatable(
+#   result_preview, escape = FALSE,
+#   caption = "🧪 Result type — GPT (batched; verbatim labels)",
+#   options = list(pageLength = 10, autoWidth = TRUE, dom = "tip")
+# )
 # 
-
 # # Save side-by-side comparison for QA
-# write.csv(result_preview, "result_type_gpt_preview.csv", row.names = FALSE)
-# write.csv(result_preview, "adaptdata_results.csv", row.names = FALSE)
-# 
+# write.csv(adaptdata, "adaptdata_results_nano6", row.names = FALSE)
+
 
 
 ```
 
 
 
+
+
+
 ```{r,echo=FALSE,}
-# --- Make "results" = Action Type + (ResultType_GPT) + CI replacements -----------
+# --- Results: simple bar chart (Input / Process / Output / Outcome) ---
+adaptdata<-read.csv("adaptdata_results_nano6.csv")
+
+RESULT_LABELS <- c("Input","Process","Output","Outcome","Impact")
+
+
+result_counts <- adaptdata %>%
+  filter(Element == "Result",
+         !is.na(ResultType_GPT),
+         nzchar(ResultType_GPT)) %>%
+  mutate(ResultType_GPT = str_squish(ResultType_GPT)) %>%
+  # map to canonical labels & drop anything off-list (just in case)
+  mutate(ResultType_GPT = sapply(ResultType_GPT, function(t) {
+    hit <- RESULT_LABELS[tolower(RESULT_LABELS) == tolower(t)]
+    ifelse(length(hit), hit, NA_character_)
+  })) %>%
+  filter(!is.na(ResultType_GPT)) %>%
+  mutate(ResultType_GPT = factor(ResultType_GPT, levels = RESULT_LABELS)) %>%
+  count(ResultType_GPT, name = "Occurrences") %>%
+  arrange(ResultType_GPT) %>%
+  mutate(Share = Occurrences / sum(Occurrences),
+         Label = paste0(Occurrences, " (", round(Share*100), "%)"))
+
+
+# horizontal bars with counts + %
+p_results <- ggplot(result_counts,
+  aes(x = ResultType_GPT, y = Occurrences, fill = ResultType_GPT)) +
+  geom_col(width = 0.7, show.legend = FALSE) +
+  geom_text(aes(label = Label), hjust = -0.15, size = 4) +
+  coord_flip(ylim = c(0, max(result_counts$Occurrences)*1.15)) +
+  scale_fill_brewer(palette = "Set2") +  # swap palette if you like
+  labs(title = "Result types by count",
+       x = NULL, y = "Occurrences") +
+  theme_minimal(base_size = 12) +
+  theme(axis.text.y = element_text(size = 13),
+        axis.text.x = element_text(size = 12))
+
+p_results
+```
+
+# Step 7 : Adaptation priorities
+
+```{r,echo=FALSE}
+
+adaptdata<-read.csv("adaptdata_results_nano6.csv")
+
+suppressPackageStartupMessages({
+  library(dplyr); library(stringr); library(purrr); library(tibble); library(readr); library(rlang)
+})
+
+# -----------------------------
+# Helper functions (same style as your impact classifier)
+# -----------------------------
+escape_regex <- function(x) str_replace_all(x, "([\\.^$|?*+()\\[\\]{}])", "\\\\\\1")
+hyphen_flexible <- function(x) str_replace_all(x, "\\s*[–-]\\s*", "\\\\s*[–-]\\\\s*")
+
+token_to_pattern <- function(token) {
+  token <- str_squish(token)
+  if (token == "") return("")
+  alts <- str_split(token, "/", simplify = TRUE) %>% as.character()
+  alts <- escape_regex(alts) %>% hyphen_flexible()
+  if (length(alts) == 1) alts else paste0("(?:", paste(alts, collapse="|"), ")")
+}
+
+phrase_to_regex <- function(phrase) {
+  tokens <- str_split(str_squish(phrase), "\\s+", simplify = TRUE) %>% as.character()
+  if (!length(tokens)) return("")
+  pats <- map_chr(tokens, token_to_pattern)
+  paste0("\\\\b", paste(pats, collapse="\\\\s+"), "\\\\b")
+}
+
+keywords_to_regex <- function(keywords) {
+  phrases <- str_split(keywords, ";", simplify = TRUE) %>% as.character() %>% str_trim()
+  phrases <- phrases[nzchar(phrases)]
+  if (!length(phrases)) return("")
+  paste(map_chr(phrases, phrase_to_regex), collapse="|")
+}
+
+strip_leading_caseflag <- function(rx) rx %>% str_replace("^\\(\\?i\\)", "") %>% str_squish()
+
+ensure_keywords_covered <- function(tbl) {
+  tbl %>%
+    mutate(
+      .kw_regex = map_chr(Keywords, keywords_to_regex),
+      .existing = map_chr(Regex, strip_leading_caseflag),
+      Regex = pmap_chr(list(.existing, .kw_regex), function(exist, kw) {
+        if (!nzchar(exist) && !nzchar(kw)) return("(?i)")
+        if (!nzchar(exist)) return(paste0("(?i)(?:", kw, ")"))
+        if (!nzchar(kw))   return(paste0("(?i)", exist))
+        paste0("(?i)(?:", exist, "|", kw, ")")
+      })
+    ) %>%
+    select(-.kw_regex, -.existing)
+}
+
+clean_ap_text <- function(x) x %>% str_replace_all("<[^>]+>", " ") %>% str_squish()
+
+# -----------------------------
+# Adaptation Priority categories (Keywords + Regex provided)
+# -----------------------------
+priority_categories <- tribble(
+  ~Category, ~Keywords, ~Regex,
+
+  "Water use efficiency & demand management",
+  "water use efficiency; irrigation efficiency; optimize irrigation; water-saving technologies; leakage reduction; reduce water losses; demand management; non-revenue water; water audits; irrigation modernization; water productivity; metering; smart meters",
+  "(?i)\\b(irrigation\\s+moderni[sz]ation|water\\s+productivit(?:y|ies)|meter(?:ing|s)|smart\\s+meters?|leak(?:age)?\\s+(?:reduction|control)|reduce\\s+water\\s+loss(?:es)?|non[-\\s]?revenue\\s+water|water\\s+audits?|demand\\s+management|water[-\\s]?saving|irrigation\\s+efficienc(?:y|ies)|water\\s+use\\s+efficienc(?:y|ies)|optimi[sz]e\\s+irrigation|water sector|water management|water resources management|water resources)\\b",
+
+  "Alternative & non-conventional water resources",
+  "rainwater harvesting; stormwater harvesting; water harvesting; water storage; storage tanks; cisterns; greywater/graywater reuse; recycled water; wastewater reuse; desalination; managed aquifer recharge; artificial recharge; emergency backup water sources; household storage",
+  "(?i)\\b(rain\\s*water\\s*harvest(?:ing)?|storm\\s*water\\s*harvest(?:ing)?|water\\s+harvest(?:ing)?|water\\s+storage|storage\\s+tanks?|cisterns?|grey\\s*water|gray\\s*water|recycl(?:ed|ing)\\s+water|waste\\s*water\\s+reus(?:e|ing)|desalinat(?:e|ion)|managed\\s+aquifer\\s+recharge|artificial\\s+recharge|backup\\s+water\\s+source(?:s)?|household\\s+storage)\\b",
+
+  "Legal, policy & institutional frameworks",
+  "legal framework; regulation; legislation; policy; governance; enforcement; institutional capacity; coordination; mainstreaming adaptation; codes; guidelines",
+  "(?i)\\b(legal\\s+frameworks?|regulations?|legislation|polic(?:y|ies)|governance|enforc(?:e|ement)|institutional\\s+(?:capacity|arrangements?)|coordination|mainstream(?:ing)?\\s+adaptation|planning\\s+codes?|guidelines?)\\b",
+
+  "Climate-smart agriculture (CSA) & resilient farming systems",
+  "climate-smart agriculture; resilient agriculture systems; diversify crops; agroforestry; conservation agriculture; soil management; sustainable production; productivity and resilience",
+  "(?i)\\b(climate[-\\s]?smart\\s+agriculture|CSA\\b|resilien\\w+\\s+(?:agriculture|farming|systems?)|diversif(?:y|ication)\\s+of\\s+crops?|agroforestry|conservation\\s+agriculture|soil\\s+management|sustainable\\s+(?:agri\\w*\\s+)?production|agroecological transition)\\b",
+
+  "Sustainable land & farm management (incl. organic/landscape approaches)",
+  "sustainable farming practices; sustainable land management; landscape-based organic farming; integrated agriculture landscape systems; integrated landscape",
+  "(?i)\\b(sustainable\\s+(?:farming|agricult\\w*|land\\s+management)|SLM\\b|landscape[-\\s]?based\\s+organic\\s+farming|integrated\\s+(?:agricultur(?:e|al)\\s+)?landscape\\s+system(?:s)?|integrated\\s+landscape)\\b",
+
+  "Climate-resilient crops & access to resilient seeds",
+  "climate-resilient crop varieties; drought/heat/pest tolerant crops; access to resilient seeds; seed systems",
+  "(?i)\\b(resilien\\w+\\s+(?:crops?|variet(?:y|ies))|toleran\\w+\\s+(?:drought|heat|pests?)|resilien\\w+\\s+seed(?:s)?|seed\\s+system(?:s)?)\\b",
+
+  "Farmer capacity, extension & knowledge services",
+  "farmers' adaptive capacity; farmer training; extension services; knowledge exchange; capacity building",
+  "(?i)\\b(farmer(?:s)?'?\\s+(?:training|capacity|skills)|agricultur\\w*\\s+extension|knowledge\\s+exchange|capacity\\s+build(?:ing|s))\\b",
+
+  "Agricultural water management",
+  "improving water management in agriculture; irrigation; watershed management; on-farm water management; reduce water wastage",
+  "(?i)\\b(water\\s+management\\s+in\\s+agricultur\\w*|irrigation|watershed\\s+management|on[-\\s]?farm\\s+water\\s+management|reduc(?:e|ing)\\s+water\\s+wastage)\\b",
+
+  "Rural development & livelihood diversification",
+  "supporting rural development; income diversification; market access; rural infrastructure",
+  "(?i)\\b(rural\\s+development|income\\s+diversification|market\\s+access|rural\\s+infrastructure)\\b",
+
+  "Ecosystem protection, restoration & protected areas",
+  "protect and restore ecosystems; biodiversity conservation; habitat restoration; protected areas; nature reserves; ecological redlines; wetlands restoration",
+  "(?i)\\b(biodiversit\\w+|ecosystem\\s+(?:protection|restoration|services?)|habitat\\s+restoration|protected\\s+areas?|nature\\s+reserves?|ecological\\s+(?:protection\\s+)?redlines?|wetlands?\\s+restoration)\\b",
+
+  "Combat land degradation & desertification",
+  "land degradation; desertification; soil erosion control; soil fertility; rehabilitate degraded lands; land degradation neutrality",
+  "(?i)\\b(land\\s+degradation|desertification|soil\\s+erosion\\s*(?:control)?|soil\\s+fertilit(?:y|ies)|degraded\\s+land\\s+(?:rehabilitation|restoration)|land\\s+degradation\\s+neutralit(?:y|ies))\\b",
+
+  "Afforestation, reforestation & carbon sinks",
+  "afforestation; reforestation; carbon sequestration; increase forest cover; forest stock volume",
+  "(?i)\\b(afforestation|reforestation|carbon\\s+sequestration|increase\\s+forest\\s+cover|forest\\s+stock\\s+volume)\\b",
+
+  "Invasive species management",
+  "managing invasive species; controlling invasive species; invasive alien species; IAS",
+  "(?i)\\b(invasive\\s+(?:alien\\s+)?species|IAS\\b|control\\s+invasive\\s+species|manage\\s+invasive|invasive)\\b",
+
+  "Land-use & spatial planning integration",
+  "integration into land use planning; spatial plans; zoning; urban planning codes; territorial planning; catchment management plans",
+  "(?i)\\b(land[-\\s]?use\\s+planning|spatial\\s+(?:plan|plans|planning)|zoning|urban\\s+planning\\s+codes?|territorial\\s+planning|catchment\\s+management\\s+plans?)\\b",
+
+  "Monitoring, data & hydrological observation",
+  "hydrometeorological observation; systematic observation; climate projections; climate services; hydrological monitoring; monitoring and evaluation; MEL; data access; information systems; analytical base",
+  "(?i)\\b(hydrometeorolog\\w+|systematic\\s+observation|climate\\s+projection(?:s)?|climate\\s+services?|hydrolog\\w+\\s+monitoring|monitoring\\s+(?:and\\s+)?evaluation|\\bMEL\\b|\\bM&?E\\b|data\\s+(?:access|sharing|system(?:s)?|management)|information\\s+system(?:s)?|analytical\\s+base)\\b",
+
+  "National adaptation frameworks & strategies (incl. NAP/NCCAS & M&E)",
+  "comprehensive national adaptation framework; NAP; national strategy; strategy 2035; BTR; Table 4.2; implementation periods; goals and objectives; action-oriented; quantification; progress on implementation; framework",
+  "(?i)\\b(NAP\\b|national\\s+adaptation\\s+strategy|strategy\\s*2035|\\bBTR\\b|Table\\s*4\\.2|implementation\\s+period(?:s)?|goals?\\s+and\\s+objectives?|action[-\\s]?oriented|quantification|progress\\s+on\\s+implementation|framework)\\b",
+
+  "Local adaptation capacity & community empowerment",
+  "strengthen local adaptation capacities; equip communities; community-based adaptation; local governments; regional organizations; CCCF; CCU; CIDP",
+  "(?i)\\b(local\\s+adaptation\\s+capacities|equip\\s+communities|community[-\\s]?based\\s+adaptation|local\\s+governments?|regional\\s+organisations?|\\bCCCFs?\\b|\\bCCUs?\\b|\\bCIDPs?|community engagement\\b)\\b",
+
+  "Public awareness, education & engagement",
+  "public awareness; education campaigns; stakeholder engagement; school programs; curriculum; curricula; educational standards; inform and involve",
+  "(?i)\\b(public\\s+awareness|education\\s+campaigns?|stakeholder\\s+engagement|school\\s+program(?:s|mes)|curricul(?:um|a)|educational\\s+standards|inform\\s+and\\s+involve)\\b",
+
+  "Institutional & technical capacity building",
+  "build institutional capacity; build technical capacity; training personnel; build capabilities; inter-agency coordination",
+  "(?i)\\b(institutional\\s+capacity|technical\\s+capacity|training\\s+personnel|build\\s+capabilit(?:y|ies)|inter[-\\s]?agency\\s+coordination)\\b",
+
+  "Policy mainstreaming & regulatory integration",
+  "integrate adaptation into policies; integrate adaptation into legislation; policy integration; regulatory integration; embed adaptation; eco-label; green procurement",
+  "(?i)\\b(mainstream(?:ing)?\\s+adaptation|integrat(?:e|ion)\\s+of\\s+adaptation\\s+into\\s+(?:polic(?:y|ies)|legislation|planning)|policy\\s+integration|regulatory\\s+integration|embed\\s+adaptation|eco[-\\s]?labell?ing|green\\s+procurement)\\b",
+
+  "Cross-sectoral collaboration & partnerships",
+  "cross-sectoral collaboration; partnerships; coordination across sectors; community partnerships",
+  "(?i)\\b(cross[-\\s]?sectoral\\s+collaboration|partnerships?|coordination\\s+across\\s+sectors|community\\s+partnerships?)\\b",
+
+  "Data management, knowledge & information services",
+  "data management; data sharing; knowledge management; knowledge sharing; knowledge transfer; methodologies and tools",
+  "(?i)\\b(data\\s+(?:management|sharing)|knowledge\\s+(?:management|sharing|transfer)|methodologies\\s+and\\s+tools|data|increase knwoledge|knowledge|database|public information|dissemination)\\b",
+
+  "Evidence base, risk & impact assessments",
+  "risk assessments; vulnerability assessments; risk and vulnerability assessment; impact reports; threat identification; geospatial mapping; transboundary; cross-border; vulnerability components; sector risk assessment; building/housing risk assessment",
+  "(?i)\\b(risk\\s+assessments?|vulnerability\\s+assessments?|risk\\s+and\\s+vulnerability\\s+assessment|impact\\s+reports?|threat\\s+identification|geo[-\\s]?spatial\\s+mapping|transboundary|cross[-\\s]?border|vulnerability\\s+components|sector\\s+risk\\s+assessments?|housing\\s+infrastructure\\s+(?:risk|vulnerability)\\s+assessment|conduct|conducting)\\b",
+
+  "Subnational adaptation priorities & sector packages",
+  "ACT priorities; Northern Territory priorities; Queensland priorities; SA urban greening; biodiversity act; planning review; urban water strategy; WA strategy directions",
+  "(?i)\\b(Australian\\s+Capital\\s+Territory|\\bACT\\b|Northern\\s+Territory|Queensland|South\\s+Australia|Urban\\s+Greening\\s+Strategy|biodiversity\\s+legislation|Planning\\s+Review|Urban\\s+Water\\s+Strategy|Western\\s+Australia|WA\\b\\s+Climate\\s+Adaptation\\s+Strategy)\\b",
+
+  "Agro-meteorological & climate information services",
+  "agro-meteorological services; climate information services; agricultural advisories; agrometeorological forecasts",
+  "(?i)\\b(agro[-\\s]?meteorolog\\w+\\s+(?:services|forecasts?)|climate\\s+information\\s+services?|agricultur\\w*\\s+advisories)\\b",
+
+  "Post-harvest, food loss reduction & risk transfer",
+  "reduce crop loss; post-harvest technologies; postharvest; value addition; cold chain; crop insurance; export markets",
+  "(?i)\\b(post\\s*harvest|post[-\\s]?harvest|value\\s+addition|cold\\s+chain|crop\\s+insurance|reduc(?:e|ing)\\s+crop\\s+loss(?:es)?|export\\s+markets?)\\b",
+
+  "Climate-resilient livestock systems",
+  "climate-resilient livestock; livestock management; heat/drought tolerant breeds; animal health; livestock insurance",
+  "(?i)\\b(climate[-\\s]?resilien\\w+\\s+livestock|livestock\\s+(?:management|insurance|health)|heat[-\\s]?tolerant\\s+breeds?|drought[-\\s]?tolerant\\s+breeds?)\\b",
+
+  "Research, innovation & investment (agri/health)",
+  "investment in research; research and innovation; technology development; technology transfer; telemedicine; scientific support; technical support",
+  "(?i)\\b(invest(?:ment)?\\s+in\\s+research|research\\s+and\\s+innovation|technology\\s+(?:development|transfer)|telemedicine|scientific\\s+support|technical\\s+support)\\b",
+
+  "Fire management & response capability",
+  "adaptive fire management; reduce causes of forest fires; response capability; prescribed burning; incident management training; local forest plans",
+  "(?i)\\b(fire\\s+management|prescribed\\s+burn(?:s|ing)|reduce\\s+forest\\s+fires|response\\s+capability|incident\\s+management\\s+training|local\\s+forest\\s+plans?)\\b",
+
+  "Community-based forest management & re/afforestation",
+  "community-based forest management; reforestation initiatives; afforestation; community involvement in forest",
+  "(?i)\\b(community[-\\s]?based\\s+forest\\s+management|reforestation\\b|afforestation\\b|community\\s+involvement\\s+in\\s+forest)\\b",
+
+  "Biodiversity assessment & monitoring",
+  "biodiversity assessment; biodiversity inventories; monitoring programs",
+  "(?i)\\b(biodiversity\\s+assessment|biodiversity\\s+inventor(?:y|ies)|monitoring\\s+program(?:s|mes))\\b",
+
+  "Public health: surveillance, systems & workforce",
+  "early warning systems for disease; disease surveillance systems; surveillance and control; strengthen healthcare workforce; public health campaigns; malaria; vector-borne diseases; prevention; diagnostic",
+  "(?i)\\b(early\\s+warning\\s+systems?\\s*(?:for\\s+)?(?:disease|health|heatwaves?)|disease\\s+surveillance\\s+systems?|surveillance\\s+and\\s+control|public\\s+health\\s+campaigns?|healthcare\\s+(?:capacity|workforce)|training\\s+healthcare\\s+professionals?|malaria|vector[-\\s]?borne\\s+diseases?|prevention|diagnostic|disease outbreaks)\\b",
+
+  "Public health infrastructure & services (incl. WASH, energy)",
+  "health facilities; health establishments; hospitals; clinics; WASH; water and sanitation; backup power; renewable energy for health; protective measures; hardening",
+  "(?i)\\b(health\\s+(?:facilit(?:y|ies)|establishments?|systems?)|hospitals?|clinics?|\\bWASH\\b|water\\s+and\\s+sanitation|backup\\s+power|renewable\\s+energy\\s+for\\s+health|protective\\s+measures|hardening|health service|health infrastructure|healthcare infrastructure)\\b",
+
+  "Urban climate resilience & planning",
+  "urban resilience; built environment; informal settlement upgrading; slum upgrading; stormwater management; waste management; SEZ; transport infrastructure and services; housing; design guidelines; infrastructure vulnerability assessments; climate-resilient infrastructure",
+  "(?i)\\b(urban\\s+(?:planning|resilience)|built\\s+environment|informal\\s+settlement\\s+upgrading|slum\\s+upgrading|storm\\s*water\\s+management|waste\\s+management|\\bSEZ\\b|transport\\s+(?:infrastructure|services)|housing|design\\s+guidelines?|vulnerability\\s+assessments?\\s+of\\s+(?:infrastructure|buildings?|housing)|climate[-\\s]?resilien\\w+\\s+infrastructure|informal settlement|buildings|building)\\b",
+
+  "Urban green/blue infrastructure & heat mitigation",
+  "green infrastructure; urban greening; tree canopy; green spaces; bioswales; rain gardens; stormwater harvesting; cool roofs; permeable pavements; nature-based solutions; wetlands encroachment; road water harvesting",
+  "(?i)\\b(green\\s+infrastructure|urban\\s+greening|tree\\s+canopy|green\\s+spaces?|bioswales?|rain\\s+gardens?|storm\\s*water\\s+harvesting|cool\\s+roofs?|permeable\\s+(?:pavements?|surfaces?)|nature[-\\s]?based\\s+solutions?|wetlands?\\s+encroachment|road\\s+water\\s+harvesting)\\b",
+
+  "Disaster risk reduction, EWS & emergency management",
+  "disaster risk reduction; DRR; early warning systems; public access to climate information; emergency responders training; forecast-based financing; early action protocols; emergency management system; unified command; loss and damage",
+  "(?i)\\b(disaster\\s+risk\\s+reduction|\\bDRR\\b|early\\s+warning\\s+systems?|public\\s+access\\s+to\\s+climate\\s+information|emergency\\s+responders?\\s+training|forecast[-\\s]?based\\s+financing|early\\s+action\\s+protocols?|emergency\\s+management\\s+system|unified\\s+command|loss(?:es)?\\s+and\\s+damages?)\\b",
+
+  "Energy & grid resilience",
+  "grid resilience enhancement; energy infrastructure; climate proofing energy; renewable energy supply chain; backup power",
+  "(?i)\\b(grid\\s+resilienc\\w+|energy\\s+infrastructure|climate\\s+proofing\\s+energy|renewable\\s+energy\\s+supply\\s+chain|backup\\s+power|energy sector|energy|power|cooling)\\b",
+
+  "Coastal & marine ecosystem protection/restoration",
+  "coastal fringe; coastline resilience; mangroves; mangrove management plan; mangrove ecotourism; seaweed farming; blue carbon; coastal wetlands; shoreline retention; bay construction; bay restoration; coastal restoration; marine ecosystems",
+  "(?i)\\b(coastal\\s+fringe|coastline\\s+resilienc\\w+|mangroves?|mangrove\\s+management\\s+plan|mangrove\\s+ecotourism|seaweed\\s+farming|blue\\s+carbon|coastal\\s+wetlands?|shoreline\\s+retention|bay\\s+(?:construction|restoration)|coastal\\s+restoration|marine\\s+ecosystem(?:s)?|coral|reef|reefs)\\b",
+
+  "Agricultural resource efficiency & high-standard farmland",
+  "high-standard farmland; fertilizer utilization rate; pesticide utilization rate; plastic film recycling; manure utilization; degraded farmland treatment",
+  "(?i)\\b(high[-\\s]?standard\\s+farmland|fertili[sz]er\\s+utili[sz]ation\\s+rate|pesticide\\s+utili[sz]ation\\s+rate|plastic\\s+film\\s+recycling|manure\\s+utili[sz]ation|degraded\\s+farmland\\s+(?:treatment|restoration))\\b",
+
+  "Water allocation, security & quantified targets",
+  "water security; total water consumption; consumption cap; optimized allocation of water resources; water supply capacity; emergency backup water sources; rural tap water coverage; national water security",
+  "(?i)\\b(water\\s+security|total\\s+water\\s+consumption|consumption\\s+cap|optim(?:i|)s(?:e|ed)\\s+allocation\\s+of\\s+water\\s+resources|water\\s+supply\\s+capacity|emergency\\s+backup\\s+water\\s+source(?:s)?|rural\\s+tap\\s+water\\s+coverage|national\\s+water\\s+security)\\b",
+
+  "Transport infrastructure & services adaptation",
+  "improved transport infrastructure and services; roads; railways; ports; airports; mobility",
+  "(?i)\\b(transport\\s+(?:infrastructure|services)|roads?|railways?|ports?|airports?|mobility|transport)\\b",
+
+  "Industry & mining adaptation",
+  "climate compatible mining; industrial adaptation; industry resilience",
+  "(?i)\\b(mining|climate\\s+compatible\\s+mining|industrial\\s+adaptation|industry\\s+resilience)\\b",
+
+  "Sectoral adaptation plans & guidelines",
+  "sector adaptation plans; sector guidelines; sector risk assessments; sector action plans; tourism guidelines; action plans for the sector",
+  "(?i)\\b(sector(?:al)?\\s+(?:adaptation\\s+)?plans?|sector\\s+guidelines?|sector\\s+risk\\s+assessments?|sector\\s+action\\s+plans?|tourism\\s+guidelines?)\\b",
+
+  "Finance, insurance & social protection",
+  "mobilize capital; mobilizing capital; mobilization of capital; green investments; access to climate finance; insurance; social safety nets; capital markets; credit lines; enterprise funds; CCCF",
+  "(?i)\\b(mobiliz(?:e|ing|ation)\\s+(?:capital|investment)|green\\s+investments?|access\\s+to\\s+climate\\s+finance|insurance|social\\s+safety\\s+nets?|capital\\s+markets?|credit\\s+lines?|enterprise\\s+funds?|\\bCCCFs?|funds|funding\\b)\\b",
+
+  "Tourism sector adaptation",
+  "tourism sector; seaside tourism; tourism model; ecotourism; tourism action plans",
+  "(?i)\\b(tourism|seaside\\s+tourism|tourism\\s+model|ecotourism|tourism\\s+action\\s+plans?)\\b",
+
+  "Gender & social inclusion",
+  "gender perspective; women; girls; indigenous people; just transition; inclusion; vulnerable groups",
+  "(?i)\\b(gender\\s+perspective|women|girls|indigenous|just\\s+transition|inclusion|vulnerable\\s+groups|just transition|aboriginal)\\b"
+)
+
+# Merge manual Regex with auto-generated one from Keywords
+priority_categories <- ensure_keywords_covered(priority_categories)
+
+# -----------------------------
+# Classifier
+# -----------------------------
+match_priorities <- function(txt, map = priority_categories) {
+  if (is.na(txt) || !nzchar(txt)) return(character(0))
+  s <- clean_ap_text(txt)
+  hits <- map$Category[ map_lgl(map$Regex, ~ str_detect(s, .x)) ]
+  unique(hits)
+}
+
+categorize_priority_vector <- function(v, map = priority_categories) {
+  map_chr(v, ~{
+    cats <- match_priorities(.x, map = map)
+    if (length(cats) == 0) NA_character_ else paste(cats, collapse = "; ")
+  })
+}
+
+# -----------------------------
+# Apply to your data (Element == "Adaptation priorities")
+# -----------------------------
+stopifnot(exists("adaptdata"))
+
+# Select the text column (prefer ElementText, fallback ElementText_MAN, else NA)
+text_choices <- intersect(c("ElementText", "ElementText_MAN"), names(adaptdata))
+if (length(text_choices) == 0L) stop("No ElementText or ElementText_MAN columns found.")
+
+ap_rows <- adaptdata %>% filter(tolower(Element) == "adaptation priorities")
+
+if (nrow(ap_rows) > 0) {
+  ap_rows <- ap_rows %>%
+    mutate(.TextForScan = coalesce(!!!rlang::syms(text_choices))) %>%
+    mutate(PriorityCategories = categorize_priority_vector(.TextForScan)) %>%
+    select(-.TextForScan)
+
+  # Ensure column exists on base; then left-join updates back (keeps original row order)
+  # Ensure column exists in adaptdata
+if (!"PriorityCategories" %in% names(adaptdata)) {
+  adaptdata <- adaptdata %>% mutate(PriorityCategories = NA_character_)
+}
+
+# Update only rows that are adaptation priorities
+adaptdata <- adaptdata %>%
+  mutate(
+    PriorityCategories = if_else(
+      tolower(Element) == "adaptation priorities",
+      categorize_priority_vector(coalesce(!!!rlang::syms(text_choices))),
+      PriorityCategories
+    )
+  )
+
+
+  cov_ap <- adaptdata %>%
+    filter(tolower(Element) == "adaptation priorities") %>%
+    summarise(cov = mean(!is.na(PriorityCategories))) %>% pull(cov)
+
+  message(sprintf("Adaptation priorities categorization coverage: %.1f%%",
+                  100 * cov_ap))
+} else {
+  message("No rows with Element == 'Adaptation priorities' found.")
+}
+
+# Optional export:
+# write_csv(adaptdata, "adaptdata_with_priority_categories_nano6.csv")
+
+
+```
+
+
+```{r}
+
+```
+
+# link to overview
+
+```{r,echo=FALSE,}
+# # --- Make "results" = Action Type + (ResultType_GPT) + CI replacements -----------
 # suppressPackageStartupMessages({
 #   library(dplyr); library(readr); library(stringr); library(tidyr)
 # })
@@ -2590,371 +3090,12 @@ DT::datatable(
 #   select(-c("...1","...2","...3","...4","ResultType","ResultType_Manual"))
 # 
 # readr::write_csv(actiontyp_plus_results, "adaptdatafinal.csv")
-# 
 
 
 
 
-```
-
-
-```{r,echo=FALSE,}
-# # --- Results: simple bar chart (Input / Process / Output / Outcome) ---
-# 
-# RESULT_LABELS <- c("Input","Process","Output","Outcome")
-# 
-# 
-# result_counts <- actiontyp_plus_results %>%
-#   filter(Element == "Result",
-#          !is.na(ResultType_GPT),
-#          nzchar(ResultType_GPT)) %>%
-#   mutate(ResultType_GPT = str_squish(ResultType_GPT)) %>%
-#   # map to canonical labels & drop anything off-list (just in case)
-#   mutate(ResultType_GPT = sapply(ResultType_GPT, function(t) {
-#     hit <- RESULT_LABELS[tolower(RESULT_LABELS) == tolower(t)]
-#     ifelse(length(hit), hit, NA_character_)
-#   })) %>%
-#   filter(!is.na(ResultType_GPT)) %>%
-#   mutate(ResultType_GPT = factor(ResultType_GPT, levels = RESULT_LABELS)) %>%
-#   count(ResultType_GPT, name = "Occurrences") %>%
-#   arrange(ResultType_GPT) %>%
-#   mutate(Share = Occurrences / sum(Occurrences),
-#          Label = paste0(Occurrences, " (", round(Share*100), "%)"))
-# 
-# 
-# # horizontal bars with counts + %
-# p_results <- ggplot(result_counts,
-#   aes(x = ResultType_GPT, y = Occurrences, fill = ResultType_GPT)) +
-#   geom_col(width = 0.7, show.legend = FALSE) +
-#   geom_text(aes(label = Label), hjust = -0.15, size = 4) +
-#   coord_flip(ylim = c(0, max(result_counts$Occurrences)*1.15)) +
-#   scale_fill_brewer(palette = "Set2") +  # swap palette if you like
-#   labs(title = "Result types by count",
-#        x = NULL, y = "Occurrences") +
-#   theme_minimal(base_size = 12) +
-#   theme(axis.text.y = element_text(size = 13),
-#         axis.text.x = element_text(size = 12))
-# 
-# p_results
-```
-
-# Step 7 : Adaptation priorities
-
-```{r,echo=FALSE}
-# 
-# suppressPackageStartupMessages({
-#   library(dplyr); library(stringr); library(purrr); library(tibble); library(readr); library(rlang)
-# })
-# 
-# # -----------------------------
-# # Helper functions (same style as your impact classifier)
-# # -----------------------------
-# escape_regex <- function(x) str_replace_all(x, "([\\.^$|?*+()\\[\\]{}])", "\\\\\\1")
-# hyphen_flexible <- function(x) str_replace_all(x, "\\s*[–-]\\s*", "\\\\s*[–-]\\\\s*")
-# 
-# token_to_pattern <- function(token) {
-#   token <- str_squish(token)
-#   if (token == "") return("")
-#   alts <- str_split(token, "/", simplify = TRUE) %>% as.character()
-#   alts <- escape_regex(alts) %>% hyphen_flexible()
-#   if (length(alts) == 1) alts else paste0("(?:", paste(alts, collapse="|"), ")")
-# }
-# 
-# phrase_to_regex <- function(phrase) {
-#   tokens <- str_split(str_squish(phrase), "\\s+", simplify = TRUE) %>% as.character()
-#   if (!length(tokens)) return("")
-#   pats <- map_chr(tokens, token_to_pattern)
-#   paste0("\\\\b", paste(pats, collapse="\\\\s+"), "\\\\b")
-# }
-# 
-# keywords_to_regex <- function(keywords) {
-#   phrases <- str_split(keywords, ";", simplify = TRUE) %>% as.character() %>% str_trim()
-#   phrases <- phrases[nzchar(phrases)]
-#   if (!length(phrases)) return("")
-#   paste(map_chr(phrases, phrase_to_regex), collapse="|")
-# }
-# 
-# strip_leading_caseflag <- function(rx) rx %>% str_replace("^\\(\\?i\\)", "") %>% str_squish()
-# 
-# ensure_keywords_covered <- function(tbl) {
-#   tbl %>%
-#     mutate(
-#       .kw_regex = map_chr(Keywords, keywords_to_regex),
-#       .existing = map_chr(Regex, strip_leading_caseflag),
-#       Regex = pmap_chr(list(.existing, .kw_regex), function(exist, kw) {
-#         if (!nzchar(exist) && !nzchar(kw)) return("(?i)")
-#         if (!nzchar(exist)) return(paste0("(?i)(?:", kw, ")"))
-#         if (!nzchar(kw))   return(paste0("(?i)", exist))
-#         paste0("(?i)(?:", exist, "|", kw, ")")
-#       })
-#     ) %>%
-#     select(-.kw_regex, -.existing)
-# }
-# 
-# clean_ap_text <- function(x) x %>% str_replace_all("<[^>]+>", " ") %>% str_squish()
-# 
-# # -----------------------------
-# # Adaptation Priority categories (Keywords + Regex provided)
-# # -----------------------------
-# priority_categories <- tribble(
-#   ~Category, ~Keywords, ~Regex,
-# 
-#   "Water use efficiency & demand management",
-#   "water use efficiency; irrigation efficiency; optimize irrigation; water-saving technologies; leakage reduction; reduce water losses; demand management; non-revenue water; water audits; irrigation modernization; water productivity; metering; smart meters",
-#   "(?i)\\b(irrigation\\s+moderni[sz]ation|water\\s+productivit(?:y|ies)|meter(?:ing|s)|smart\\s+meters?|leak(?:age)?\\s+(?:reduction|control)|reduce\\s+water\\s+loss(?:es)?|non[-\\s]?revenue\\s+water|water\\s+audits?|demand\\s+management|water[-\\s]?saving|irrigation\\s+efficienc(?:y|ies)|water\\s+use\\s+efficienc(?:y|ies)|optimi[sz]e\\s+irrigation|water sector|water management|water resources management|water resources)\\b",
-# 
-#   "Alternative & non-conventional water resources",
-#   "rainwater harvesting; stormwater harvesting; water harvesting; water storage; storage tanks; cisterns; greywater/graywater reuse; recycled water; wastewater reuse; desalination; managed aquifer recharge; artificial recharge; emergency backup water sources; household storage",
-#   "(?i)\\b(rain\\s*water\\s*harvest(?:ing)?|storm\\s*water\\s*harvest(?:ing)?|water\\s+harvest(?:ing)?|water\\s+storage|storage\\s+tanks?|cisterns?|grey\\s*water|gray\\s*water|recycl(?:ed|ing)\\s+water|waste\\s*water\\s+reus(?:e|ing)|desalinat(?:e|ion)|managed\\s+aquifer\\s+recharge|artificial\\s+recharge|backup\\s+water\\s+source(?:s)?|household\\s+storage)\\b",
-# 
-#   "Legal, policy & institutional frameworks",
-#   "legal framework; regulation; legislation; policy; governance; enforcement; institutional capacity; coordination; mainstreaming adaptation; codes; guidelines",
-#   "(?i)\\b(legal\\s+frameworks?|regulations?|legislation|polic(?:y|ies)|governance|enforc(?:e|ement)|institutional\\s+(?:capacity|arrangements?)|coordination|mainstream(?:ing)?\\s+adaptation|planning\\s+codes?|guidelines?)\\b",
-# 
-#   "Climate-smart agriculture (CSA) & resilient farming systems",
-#   "climate-smart agriculture; resilient agriculture systems; diversify crops; agroforestry; conservation agriculture; soil management; sustainable production; productivity and resilience",
-#   "(?i)\\b(climate[-\\s]?smart\\s+agriculture|CSA\\b|resilien\\w+\\s+(?:agriculture|farming|systems?)|diversif(?:y|ication)\\s+of\\s+crops?|agroforestry|conservation\\s+agriculture|soil\\s+management|sustainable\\s+(?:agri\\w*\\s+)?production)\\b",
-# 
-#   "Sustainable land & farm management (incl. organic/landscape approaches)",
-#   "sustainable farming practices; sustainable land management; landscape-based organic farming; integrated agriculture landscape systems; integrated landscape",
-#   "(?i)\\b(sustainable\\s+(?:farming|agricult\\w*|land\\s+management)|SLM\\b|landscape[-\\s]?based\\s+organic\\s+farming|integrated\\s+(?:agricultur(?:e|al)\\s+)?landscape\\s+system(?:s)?|integrated\\s+landscape)\\b",
-# 
-#   "Climate-resilient crops & access to resilient seeds",
-#   "climate-resilient crop varieties; drought/heat/pest tolerant crops; access to resilient seeds; seed systems",
-#   "(?i)\\b(resilien\\w+\\s+(?:crops?|variet(?:y|ies))|toleran\\w+\\s+(?:drought|heat|pests?)|resilien\\w+\\s+seed(?:s)?|seed\\s+system(?:s)?)\\b",
-# 
-#   "Farmer capacity, extension & knowledge services",
-#   "farmers' adaptive capacity; farmer training; extension services; knowledge exchange; capacity building",
-#   "(?i)\\b(farmer(?:s)?'?\\s+(?:training|capacity|skills)|agricultur\\w*\\s+extension|knowledge\\s+exchange|capacity\\s+build(?:ing|s))\\b",
-# 
-#   "Agricultural water management",
-#   "improving water management in agriculture; irrigation; watershed management; on-farm water management; reduce water wastage",
-#   "(?i)\\b(water\\s+management\\s+in\\s+agricultur\\w*|irrigation|watershed\\s+management|on[-\\s]?farm\\s+water\\s+management|reduc(?:e|ing)\\s+water\\s+wastage)\\b",
-# 
-#   "Rural development & livelihood diversification",
-#   "supporting rural development; income diversification; market access; rural infrastructure",
-#   "(?i)\\b(rural\\s+development|income\\s+diversification|market\\s+access|rural\\s+infrastructure)\\b",
-# 
-#   "Ecosystem protection, restoration & protected areas",
-#   "protect and restore ecosystems; biodiversity conservation; habitat restoration; protected areas; nature reserves; ecological redlines; wetlands restoration",
-#   "(?i)\\b(biodiversit\\w+|ecosystem\\s+(?:protection|restoration|services?)|habitat\\s+restoration|protected\\s+areas?|nature\\s+reserves?|ecological\\s+(?:protection\\s+)?redlines?|wetlands?\\s+restoration)\\b",
-# 
-#   "Combat land degradation & desertification",
-#   "land degradation; desertification; soil erosion control; soil fertility; rehabilitate degraded lands; land degradation neutrality",
-#   "(?i)\\b(land\\s+degradation|desertification|soil\\s+erosion\\s*(?:control)?|soil\\s+fertilit(?:y|ies)|degraded\\s+land\\s+(?:rehabilitation|restoration)|land\\s+degradation\\s+neutralit(?:y|ies))\\b",
-# 
-#   "Afforestation, reforestation & carbon sinks",
-#   "afforestation; reforestation; carbon sequestration; increase forest cover; forest stock volume",
-#   "(?i)\\b(afforestation|reforestation|carbon\\s+sequestration|increase\\s+forest\\s+cover|forest\\s+stock\\s+volume)\\b",
-# 
-#   "Invasive species management",
-#   "managing invasive species; controlling invasive species; invasive alien species; IAS",
-#   "(?i)\\b(invasive\\s+(?:alien\\s+)?species|IAS\\b|control\\s+invasive\\s+species|manage\\s+invasive|invasive)\\b",
-# 
-#   "Land-use & spatial planning integration",
-#   "integration into land use planning; spatial plans; zoning; urban planning codes; territorial planning; catchment management plans",
-#   "(?i)\\b(land[-\\s]?use\\s+planning|spatial\\s+(?:plan|plans|planning)|zoning|urban\\s+planning\\s+codes?|territorial\\s+planning|catchment\\s+management\\s+plans?)\\b",
-# 
-#   "Monitoring, data & hydrological observation",
-#   "hydrometeorological observation; systematic observation; climate projections; climate services; hydrological monitoring; monitoring and evaluation; MEL; data access; information systems; analytical base",
-#   "(?i)\\b(hydrometeorolog\\w+|systematic\\s+observation|climate\\s+projection(?:s)?|climate\\s+services?|hydrolog\\w+\\s+monitoring|monitoring\\s+(?:and\\s+)?evaluation|\\bMEL\\b|\\bM&?E\\b|data\\s+(?:access|sharing|system(?:s)?|management)|information\\s+system(?:s)?|analytical\\s+base)\\b",
-# 
-#   "National adaptation frameworks & strategies (incl. NAP/NCCAS & M&E)",
-#   "comprehensive national adaptation framework; NAP; national strategy; strategy 2035; BTR; Table 4.2; implementation periods; goals and objectives; action-oriented; quantification; progress on implementation; framework",
-#   "(?i)\\b(NAP\\b|national\\s+adaptation\\s+strategy|strategy\\s*2035|\\bBTR\\b|Table\\s*4\\.2|implementation\\s+period(?:s)?|goals?\\s+and\\s+objectives?|action[-\\s]?oriented|quantification|progress\\s+on\\s+implementation|framework)\\b",
-# 
-#   "Local adaptation capacity & community empowerment",
-#   "strengthen local adaptation capacities; equip communities; community-based adaptation; local governments; regional organizations; CCCF; CCU; CIDP",
-#   "(?i)\\b(local\\s+adaptation\\s+capacities|equip\\s+communities|community[-\\s]?based\\s+adaptation|local\\s+governments?|regional\\s+organisations?|\\bCCCFs?\\b|\\bCCUs?\\b|\\bCIDPs?|community engagement\\b)\\b",
-# 
-#   "Public awareness, education & engagement",
-#   "public awareness; education campaigns; stakeholder engagement; school programs; curriculum; curricula; educational standards; inform and involve",
-#   "(?i)\\b(public\\s+awareness|education\\s+campaigns?|stakeholder\\s+engagement|school\\s+program(?:s|mes)|curricul(?:um|a)|educational\\s+standards|inform\\s+and\\s+involve)\\b",
-# 
-#   "Institutional & technical capacity building",
-#   "build institutional capacity; build technical capacity; training personnel; build capabilities; inter-agency coordination",
-#   "(?i)\\b(institutional\\s+capacity|technical\\s+capacity|training\\s+personnel|build\\s+capabilit(?:y|ies)|inter[-\\s]?agency\\s+coordination)\\b",
-# 
-#   "Policy mainstreaming & regulatory integration",
-#   "integrate adaptation into policies; integrate adaptation into legislation; policy integration; regulatory integration; embed adaptation; eco-label; green procurement",
-#   "(?i)\\b(mainstream(?:ing)?\\s+adaptation|integrat(?:e|ion)\\s+of\\s+adaptation\\s+into\\s+(?:polic(?:y|ies)|legislation|planning)|policy\\s+integration|regulatory\\s+integration|embed\\s+adaptation|eco[-\\s]?labell?ing|green\\s+procurement)\\b",
-# 
-#   "Cross-sectoral collaboration & partnerships",
-#   "cross-sectoral collaboration; partnerships; coordination across sectors; community partnerships",
-#   "(?i)\\b(cross[-\\s]?sectoral\\s+collaboration|partnerships?|coordination\\s+across\\s+sectors|community\\s+partnerships?)\\b",
-# 
-#   "Data management, knowledge & information services",
-#   "data management; data sharing; knowledge management; knowledge sharing; knowledge transfer; methodologies and tools",
-#   "(?i)\\b(data\\s+(?:management|sharing)|knowledge\\s+(?:management|sharing|transfer)|methodologies\\s+and\\s+tools|data|increase knwoledge|knowledge|database|public information|dissemination)\\b",
-# 
-#   "Evidence base, risk & impact assessments",
-#   "risk assessments; vulnerability assessments; risk and vulnerability assessment; impact reports; threat identification; geospatial mapping; transboundary; cross-border; vulnerability components; sector risk assessment; building/housing risk assessment",
-#   "(?i)\\b(risk\\s+assessments?|vulnerability\\s+assessments?|risk\\s+and\\s+vulnerability\\s+assessment|impact\\s+reports?|threat\\s+identification|geo[-\\s]?spatial\\s+mapping|transboundary|cross[-\\s]?border|vulnerability\\s+components|sector\\s+risk\\s+assessments?|housing\\s+infrastructure\\s+(?:risk|vulnerability)\\s+assessment|conduct|conducting)\\b",
-# 
-#   "Subnational adaptation priorities & sector packages",
-#   "ACT priorities; Northern Territory priorities; Queensland priorities; SA urban greening; biodiversity act; planning review; urban water strategy; WA strategy directions",
-#   "(?i)\\b(Australian\\s+Capital\\s+Territory|\\bACT\\b|Northern\\s+Territory|Queensland|South\\s+Australia|Urban\\s+Greening\\s+Strategy|biodiversity\\s+legislation|Planning\\s+Review|Urban\\s+Water\\s+Strategy|Western\\s+Australia|WA\\b\\s+Climate\\s+Adaptation\\s+Strategy)\\b",
-# 
-#   "Agro-meteorological & climate information services",
-#   "agro-meteorological services; climate information services; agricultural advisories; agrometeorological forecasts",
-#   "(?i)\\b(agro[-\\s]?meteorolog\\w+\\s+(?:services|forecasts?)|climate\\s+information\\s+services?|agricultur\\w*\\s+advisories)\\b",
-# 
-#   "Post-harvest, food loss reduction & risk transfer",
-#   "reduce crop loss; post-harvest technologies; postharvest; value addition; cold chain; crop insurance; export markets",
-#   "(?i)\\b(post\\s*harvest|post[-\\s]?harvest|value\\s+addition|cold\\s+chain|crop\\s+insurance|reduc(?:e|ing)\\s+crop\\s+loss(?:es)?|export\\s+markets?)\\b",
-# 
-#   "Climate-resilient livestock systems",
-#   "climate-resilient livestock; livestock management; heat/drought tolerant breeds; animal health; livestock insurance",
-#   "(?i)\\b(climate[-\\s]?resilien\\w+\\s+livestock|livestock\\s+(?:management|insurance|health)|heat[-\\s]?tolerant\\s+breeds?|drought[-\\s]?tolerant\\s+breeds?)\\b",
-# 
-#   "Research, innovation & investment (agri/health)",
-#   "investment in research; research and innovation; technology development; technology transfer; telemedicine; scientific support; technical support",
-#   "(?i)\\b(invest(?:ment)?\\s+in\\s+research|research\\s+and\\s+innovation|technology\\s+(?:development|transfer)|telemedicine|scientific\\s+support|technical\\s+support)\\b",
-# 
-#   "Fire management & response capability",
-#   "adaptive fire management; reduce causes of forest fires; response capability; prescribed burning; incident management training; local forest plans",
-#   "(?i)\\b(fire\\s+management|prescribed\\s+burn(?:s|ing)|reduce\\s+forest\\s+fires|response\\s+capability|incident\\s+management\\s+training|local\\s+forest\\s+plans?)\\b",
-# 
-#   "Community-based forest management & re/afforestation",
-#   "community-based forest management; reforestation initiatives; afforestation; community involvement in forest",
-#   "(?i)\\b(community[-\\s]?based\\s+forest\\s+management|reforestation\\b|afforestation\\b|community\\s+involvement\\s+in\\s+forest)\\b",
-# 
-#   "Biodiversity assessment & monitoring",
-#   "biodiversity assessment; biodiversity inventories; monitoring programs",
-#   "(?i)\\b(biodiversity\\s+assessment|biodiversity\\s+inventor(?:y|ies)|monitoring\\s+program(?:s|mes))\\b",
-# 
-#   "Public health: surveillance, systems & workforce",
-#   "early warning systems for disease; disease surveillance systems; surveillance and control; strengthen healthcare workforce; public health campaigns; malaria; vector-borne diseases; prevention; diagnostic",
-#   "(?i)\\b(early\\s+warning\\s+systems?\\s*(?:for\\s+)?(?:disease|health|heatwaves?)|disease\\s+surveillance\\s+systems?|surveillance\\s+and\\s+control|public\\s+health\\s+campaigns?|healthcare\\s+(?:capacity|workforce)|training\\s+healthcare\\s+professionals?|malaria|vector[-\\s]?borne\\s+diseases?|prevention|diagnostic|early warning|early warnings)\\b",
-# 
-#   "Public health infrastructure & services (incl. WASH, energy)",
-#   "health facilities; health establishments; hospitals; clinics; WASH; water and sanitation; backup power; renewable energy for health; protective measures; hardening",
-#   "(?i)\\b(health\\s+(?:facilit(?:y|ies)|establishments?|systems?)|hospitals?|clinics?|\\bWASH\\b|water\\s+and\\s+sanitation|backup\\s+power|renewable\\s+energy\\s+for\\s+health|protective\\s+measures|hardening|health service|health infrastructure|healthcare infrastructure)\\b",
-# 
-#   "Urban climate resilience & planning",
-#   "urban resilience; built environment; informal settlement upgrading; slum upgrading; stormwater management; waste management; SEZ; transport infrastructure and services; housing; design guidelines; infrastructure vulnerability assessments; climate-resilient infrastructure",
-#   "(?i)\\b(urban\\s+(?:planning|resilience)|built\\s+environment|informal\\s+settlement\\s+upgrading|slum\\s+upgrading|storm\\s*water\\s+management|waste\\s+management|\\bSEZ\\b|transport\\s+(?:infrastructure|services)|housing|design\\s+guidelines?|vulnerability\\s+assessments?\\s+of\\s+(?:infrastructure|buildings?|housing)|climate[-\\s]?resilien\\w+\\s+infrastructure|informal settlement|buildings|building)\\b",
-# 
-#   "Urban green/blue infrastructure & heat mitigation",
-#   "green infrastructure; urban greening; tree canopy; green spaces; bioswales; rain gardens; stormwater harvesting; cool roofs; permeable pavements; nature-based solutions; wetlands encroachment; road water harvesting",
-#   "(?i)\\b(green\\s+infrastructure|urban\\s+greening|tree\\s+canopy|green\\s+spaces?|bioswales?|rain\\s+gardens?|storm\\s*water\\s+harvesting|cool\\s+roofs?|permeable\\s+(?:pavements?|surfaces?)|nature[-\\s]?based\\s+solutions?|wetlands?\\s+encroachment|road\\s+water\\s+harvesting)\\b",
-# 
-#   "Disaster risk reduction, EWS & emergency management",
-#   "disaster risk reduction; DRR; early warning systems; public access to climate information; emergency responders training; forecast-based financing; early action protocols; emergency management system; unified command; loss and damage",
-#   "(?i)\\b(disaster\\s+risk\\s+reduction|\\bDRR\\b|early\\s+warning\\s+systems?|public\\s+access\\s+to\\s+climate\\s+information|emergency\\s+responders?\\s+training|forecast[-\\s]?based\\s+financing|early\\s+action\\s+protocols?|emergency\\s+management\\s+system|unified\\s+command|loss(?:es)?\\s+and\\s+damages?)\\b",
-# 
-#   "Energy & grid resilience",
-#   "grid resilience enhancement; energy infrastructure; climate proofing energy; renewable energy supply chain; backup power",
-#   "(?i)\\b(grid\\s+resilienc\\w+|energy\\s+infrastructure|climate\\s+proofing\\s+energy|renewable\\s+energy\\s+supply\\s+chain|backup\\s+power|energy sector|energy|power|cooling)\\b",
-# 
-#   "Coastal & marine ecosystem protection/restoration",
-#   "coastal fringe; coastline resilience; mangroves; mangrove management plan; mangrove ecotourism; seaweed farming; blue carbon; coastal wetlands; shoreline retention; bay construction; bay restoration; coastal restoration; marine ecosystems",
-#   "(?i)\\b(coastal\\s+fringe|coastline\\s+resilienc\\w+|mangroves?|mangrove\\s+management\\s+plan|mangrove\\s+ecotourism|seaweed\\s+farming|blue\\s+carbon|coastal\\s+wetlands?|shoreline\\s+retention|bay\\s+(?:construction|restoration)|coastal\\s+restoration|marine\\s+ecosystem(?:s)?|coral|reef|reefs)\\b",
-# 
-#   "Agricultural resource efficiency & high-standard farmland",
-#   "high-standard farmland; fertilizer utilization rate; pesticide utilization rate; plastic film recycling; manure utilization; degraded farmland treatment",
-#   "(?i)\\b(high[-\\s]?standard\\s+farmland|fertili[sz]er\\s+utili[sz]ation\\s+rate|pesticide\\s+utili[sz]ation\\s+rate|plastic\\s+film\\s+recycling|manure\\s+utili[sz]ation|degraded\\s+farmland\\s+(?:treatment|restoration))\\b",
-# 
-#   "Water allocation, security & quantified targets",
-#   "water security; total water consumption; consumption cap; optimized allocation of water resources; water supply capacity; emergency backup water sources; rural tap water coverage; national water security",
-#   "(?i)\\b(water\\s+security|total\\s+water\\s+consumption|consumption\\s+cap|optim(?:i|)s(?:e|ed)\\s+allocation\\s+of\\s+water\\s+resources|water\\s+supply\\s+capacity|emergency\\s+backup\\s+water\\s+source(?:s)?|rural\\s+tap\\s+water\\s+coverage|national\\s+water\\s+security)\\b",
-# 
-#   "Transport infrastructure & services adaptation",
-#   "improved transport infrastructure and services; roads; railways; ports; airports; mobility",
-#   "(?i)\\b(transport\\s+(?:infrastructure|services)|roads?|railways?|ports?|airports?|mobility|transport)\\b",
-# 
-#   "Industry & mining adaptation",
-#   "climate compatible mining; industrial adaptation; industry resilience",
-#   "(?i)\\b(mining|climate\\s+compatible\\s+mining|industrial\\s+adaptation|industry\\s+resilience)\\b",
-# 
-#   "Sectoral adaptation plans & guidelines",
-#   "sector adaptation plans; sector guidelines; sector risk assessments; sector action plans; tourism guidelines; action plans for the sector",
-#   "(?i)\\b(sector(?:al)?\\s+(?:adaptation\\s+)?plans?|sector\\s+guidelines?|sector\\s+risk\\s+assessments?|sector\\s+action\\s+plans?|tourism\\s+guidelines?)\\b",
-# 
-#   "Finance, insurance & social protection",
-#   "mobilize capital; mobilizing capital; mobilization of capital; green investments; access to climate finance; insurance; social safety nets; capital markets; credit lines; enterprise funds; CCCF",
-#   "(?i)\\b(mobiliz(?:e|ing|ation)\\s+(?:capital|investment)|green\\s+investments?|access\\s+to\\s+climate\\s+finance|insurance|social\\s+safety\\s+nets?|capital\\s+markets?|credit\\s+lines?|enterprise\\s+funds?|\\bCCCFs?|funds|funding\\b)\\b",
-# 
-#   "Tourism sector adaptation",
-#   "tourism sector; seaside tourism; tourism model; ecotourism; tourism action plans",
-#   "(?i)\\b(tourism|seaside\\s+tourism|tourism\\s+model|ecotourism|tourism\\s+action\\s+plans?)\\b",
-# 
-#   "Gender & social inclusion",
-#   "gender perspective; women; girls; indigenous people; just transition; inclusion; vulnerable groups",
-#   "(?i)\\b(gender\\s+perspective|women|girls|indigenous|just\\s+transition|inclusion|vulnerable\\s+groups|just transition|aboriginal)\\b"
-# ) 
-# 
-# # Merge manual Regex with auto-generated one from Keywords
-# priority_categories <- ensure_keywords_covered(priority_categories)
-# 
-# # -----------------------------
-# # Classifier
-# # -----------------------------
-# match_priorities <- function(txt, map = priority_categories) {
-#   if (is.na(txt) || !nzchar(txt)) return(character(0))
-#   s <- clean_ap_text(txt)
-#   hits <- map$Category[ map_lgl(map$Regex, ~ str_detect(s, .x)) ]
-#   unique(hits)
-# }
-# 
-# categorize_priority_vector <- function(v, map = priority_categories) {
-#   map_chr(v, ~{
-#     cats <- match_priorities(.x, map = map)
-#     if (length(cats) == 0) NA_character_ else paste(cats, collapse = "; ")
-#   })
-# }
-# 
-# # -----------------------------
-# # Apply to your data (Element == "Adaptation priorities")
-# # -----------------------------
-# stopifnot(exists("adaptdata"))
-# 
-# # Select the text column (prefer ElementText, fallback ElementText_MAN, else NA)
-# text_choices <- intersect(c("ElementText", "ElementText_MAN"), names(adaptdata))
-# if (length(text_choices) == 0L) stop("No ElementText or ElementText_MAN columns found.")
-# 
-# ap_rows <- adaptdata %>% filter(tolower(Element) == "adaptation priorities")
-# 
-# if (nrow(ap_rows) > 0) {
-#   ap_rows <- ap_rows %>%
-#     mutate(.TextForScan = coalesce(!!!rlang::syms(text_choices))) %>%
-#     mutate(PriorityCategories = categorize_priority_vector(.TextForScan)) %>%
-#     select(-.TextForScan)
-# 
-#   # Ensure column exists on base; then left-join updates back (keeps original row order)
-#   # Ensure column exists in adaptdata
-# if (!"PriorityCategories" %in% names(adaptdata)) {
-#   adaptdata <- adaptdata %>% mutate(PriorityCategories = NA_character_)
-# }
-# 
-# # Update only rows that are adaptation priorities
-# adaptdata <- adaptdata %>%
-#   mutate(
-#     PriorityCategories = if_else(
-#       tolower(Element) == "adaptation priorities",
-#       categorize_priority_vector(coalesce(!!!rlang::syms(text_choices))),
-#       PriorityCategories
-#     )
-#   )
-# 
-# 
-#   cov_ap <- adaptdata %>%
-#     filter(tolower(Element) == "adaptation priorities") %>%
-#     summarise(cov = mean(!is.na(PriorityCategories))) %>% pull(cov)
-# 
-#   message(sprintf("Adaptation priorities categorization coverage: %.1f%%",
-#                   100 * cov_ap))
-# } else {
-#   message("No rows with Element == 'Adaptation priorities' found.")
-# }
-# 
-# # Optional export:
-# # write_csv(adaptdata, "adaptdata_with_priority_categories.csv")
-# 
 
 ```
-
-# link to overview
 
 ```{r,echo=FALSE}
 
