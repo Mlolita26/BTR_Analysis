@@ -26,17 +26,23 @@ library(RColorBrewer)
 library(patchwork)
 library(DT)
 library(ellmer)
+library(googledrive)
 ```
 
 # Preparation
 To run this code, download the file "AdaptationElements" available at: https://doi.org/10.7910/DVN/VK3CP9.
 Adjust the file path below with the correct location where you would saved the "AdaptationElements" file
-```{r}
+```{r,echo=FALSE}
 
-xlsx_path <- "data/BTRsMergedData _18Aug2025.xlsx"
-
-adaptdata <- read_excel(xlsx_path, sheet = "DetailedInfo")
-overview  <- read_excel(xlsx_path, sheet = "Overview")
+# Authentifie ton service account
+drive_auth(path = "btr-analysis-ae557dcab06d.json")
+# ID du fichier (pris dans l’URL Google Drive)
+file_id <- "1k8l8yvmiI0FbFeV47m-gZzUMOeo9G4E4"
+# Télécharge l’Excel localement
+drive_download(as_id(file_id), path = "local_copy.xlsx", overwrite = TRUE)
+# Lis l’onglet "CombinedDataset"
+adaptdata <- read_excel("local_copy.xlsx", sheet = "CombinedDataset")
+overview<-read_excel("local_copy.xlsx", sheet = "Overview")
 
 ```
 
@@ -338,11 +344,11 @@ system_table <- tribble(
 
   "Terrestrial", "terrestrial ecosystem, terrestrial, drylands, land resource, natural resource, ecosystem structure, ecosystem services, ecological system, desertification, land degradation, soil degradation, soil erosion, environment",
 
-  "Freshwater", "freshwater, wetlands, inland wetlands, water resource, drinking water, potable water, water quality, water availability, water supply, river, water scarcity, water shortage, hydrological cycle, water stress, water table, water source, groundwater, water supplied, dams",
+  "Freshwater", "freshwater, wetlands, inland wetlands, water resource, drinking water, potable water, water quality, water availability, water supply, river, water scarcity, water shortage, hydrological cycle, water stress, water table, water source, groundwater, water supplied, dams, eutrophication, algal bloom",
 
   "Biodiversity", "biodiversity, flora, fauna, species, species extinction, extinction, range of species, ecosystem change",
 
-  "Coastal", "coast, coastal, marine, mangrove, ocean, coral, beach, coastal erosion, sea level rise, blue carbon, coastal ecosystem, coastal zone, eutrophication, algal bloom",
+  "Coastal", "coast, coastal, marine, mangrove, ocean, coral, beach, coastal erosion, sea level rise, blue carbon, coastal ecosystem, coastal zone",
 
   "Food and nutrition", "food security, food insecure, food insecurity, nutrition, malnutrition, hunger, food safety, food availability, famine, undernutrition, overnutrition, obesity",
 
@@ -400,7 +406,7 @@ sys_patterns <- list(
     "freshwater", "wetlands", "inland wetlands", "water resource", "drinking water",
     "potable water", "water quality", "water availability", "water supply",
     "river", "water scarcity", "water shortage", "hydrological cycle",
-    "water stress", "water table", "water source", "groundwater","water supplied","dams", sep = "|"
+    "water stress", "water table", "water source", "groundwater","water supplied","dams","eutrophication","algal bloom", sep = "|"
   ),
   
   Biodiversity = paste(
@@ -411,7 +417,7 @@ sys_patterns <- list(
   Coastal = paste(
     "coast", "coastal", "marine", "mangrove", "ocean", "coral", 
     "beach", "coastal erosion", "sea level rise", "blue carbon", 
-    "coastal ecosystem", "coastal zone","eutrophication","algal bloom", sep = "|"
+    "coastal ecosystem", "coastal zone", sep = "|"
   ),
   
   `Food and nutrition` = paste(
@@ -1050,6 +1056,255 @@ datatable(
   (e.g., *“increased flooding”*).  
 
 
+
+```{r,echo=FALSE}
+# suppressPackageStartupMessages({
+#   library(dplyr)
+#   library(stringr)
+#   library(glue)
+#   library(DT)
+#   library(ellmer)
+# })
+# 
+# # =================== Config ===================
+# MODEL       <- "gpt-5-nano"
+# RUN_TAG     <- "gpt6nano"
+# OUTPUT_DIR  <- "out"
+# OUTPUT_CSV  <- file.path(OUTPUT_DIR, paste0("climate_impact_keywords_", RUN_TAG, ".csv"))
+# ERROR_LOG   <- file.path(OUTPUT_DIR, paste0("ci_errors_", RUN_TAG, ".log"))
+# SAVE_EVERY  <- 25
+# MAX_CHARS   <- 6000
+# 
+# # Previous results file (from older run)
+# PREV_CSV    <- "adaptdata_climateimpact5nano.csv"
+# 
+# # ---- API key ----
+# btr_key <- Sys.getenv("BTR_KEY")
+# stopifnot("BTR_KEY is not set in your environment." = nzchar(btr_key))
+# Sys.setenv(OPENAI_API_KEY = btr_key)
+# 
+# # =================== Utilities ===================
+# dir.create(OUTPUT_DIR, showWarnings = FALSE, recursive = TRUE)
+# 
+# safe_write_csv <- function(df, path) {
+#   tmp <- paste0(path, ".tmp")
+#   ok  <- tryCatch({ utils::write.csv(df, tmp, row.names = FALSE); TRUE },
+#                   error = function(e){ message("⚠ write.csv tmp failed: ", conditionMessage(e)); FALSE })
+#   if (!ok || !file.exists(tmp)) {
+#     alt <- file.path(dirname(path), paste0("backup_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv"))
+#     utils::write.csv(df, alt, row.names = FALSE)
+#     message("✳ Wrote backup to: ", alt); return(invisible(FALSE))
+#   }
+#   if (file.exists(path)) suppressWarnings(try(unlink(path), silent = TRUE))
+#   ok2 <- suppressWarnings(try(file.rename(tmp, path), silent = TRUE))
+#   if (identical(ok2, FALSE)) { file.copy(tmp, path, overwrite = TRUE); unlink(tmp) }
+#   TRUE
+# }
+# 
+# log_error <- function(msg) {
+#   try({
+#     cat(sprintf("[%s] %s\n", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), msg),
+#         file = ERROR_LOG, append = TRUE)
+#   }, silent = TRUE)
+# }
+# 
+# make_preview_html <- function(txt) {
+#   ifelse(nchar(txt) > 90,
+#          paste0("<span title='", txt, "'>", substr(txt, 1, 90), "...</span>"),
+#          txt)
+# }
+# 
+# clip_text <- function(x, max_chars = MAX_CHARS) {
+#   if (is.na(x) || !nzchar(x) || nchar(x) <= max_chars) return(x)
+#   head <- substr(x, 1, round(max_chars * 0.7))
+#   tail <- substr(x, nchar(x) - round(max_chars * 0.3) + 1, nchar(x))
+#   paste0(head, "\n...\n", tail)
+# }
+# 
+# # ---------- Prompt ----------
+# make_ci_prompt <- function(txt) {
+#   glue::glue(
+# 'Read the "Climate impact" passage.
+# 
+# Extract short key keywords that describe the CONSEQUENCES/IMPACTS of climate (what happens to people, ecosystems, services, assets).
+# Rules:
+# - Use EXACT short phrases from the text (same language).
+# - Examples: "water shortage"; "crop yield loss"; "infrastructure damage"; "heat-related illness"; "biodiversity loss"; "coastal erosion".
+# - Exclude drivers/hazards (e.g., "heat wave", "drought") unless the text itself presents them as the impact (e.g., "increased flooding").
+# - Exclude actions/measures (e.g., "irrigation expansion", "early warning system").
+# - Return ONE line only: keywords separated by "; ".
+# 
+# TEXT:
+# """{clip_text(txt)}"""'
+#   )
+# }
+# 
+# # ---------- Client (no rate limit) ----------
+# chat_client <- ellmer::chat_openai(model = MODEL)
+# extract_once <- function(txt) chat_client$chat(make_ci_prompt(txt))
+# 
+# extract_ci_keywords <- function(txt) {
+#   if (is.na(txt) || !nzchar(txt)) return(NA_character_)
+#   tries <- 0; last_err <- ""
+#   repeat {
+#     tries <- tries + 1
+#     out <- try(extract_once(txt), silent = TRUE)
+#     if (!inherits(out, "try-error")) {
+#       out <- trimws(out)
+#       return(if (nzchar(out)) out else NA_character_)
+#     }
+#     last_err <- conditionMessage(attr(out, "condition"))
+#     if (grepl("context|token|length|too long|maximum", last_err, ignore.case = TRUE)) {
+#       txt <- clip_text(txt, max_chars = round(MAX_CHARS * 0.7))
+#     }
+#     if (tries >= 5) { log_error(paste("API error after retries:", last_err)); return(NA_character_) }
+#     Sys.sleep(min(runif(1, 1, 2) * (2^(tries - 1)), 30))  # backoff only on errors
+#   }
+# }
+# 
+# # =================== Data prep (content-key based) ===================
+# stopifnot(exists("adaptdata"))
+# 
+# # Keep RowID if present (for preview/export); otherwise create one (does NOT affect exclusion)
+# if (!"RowID" %in% names(adaptdata)) {
+#   # if the first column looks like an index (e.g., ...1), keep it as RowID; else generate
+#   first_col <- names(adaptdata)[1]
+#   if (!"RowID" %in% names(adaptdata)) {
+#     names(adaptdata)[1] <- "RowID"
+#     message(sprintf("Using first column '%s' as RowID.", first_col))
+#   }
+# }
+# if (!"ClimateImpact_Keywords" %in% names(adaptdata)) {
+#   adaptdata$ClimateImpact_Keywords <- NA_character_
+# }
+# 
+# # Helper to build a stable content key
+# make_key <- function(df) {
+#   paste(
+#     df$Country |> as.character() |> trimws(),
+#     df$Document |> as.character() |> trimws(),
+#     df$Element  |> as.character() |> trimws() |> tolower(),
+#     df$ElementText |> as.character() |> trimws(),
+#     sep = " | "
+#   )
+# }
+# 
+# # Current climate-impact rows + key
+# cur_clim_idx <- which(grepl("^\\s*Climate impact\\s*$", adaptdata$Element, ignore.case = TRUE))
+# c# ---------- NA-safe helpers ----------
+# nzchr <- function(x) trimws(ifelse(is.na(x), "", as.character(x)))
+# 
+# make_key <- function(df) {
+#   paste(
+#     nzchr(df$Country),
+#     nzchr(df$Document),
+#     tolower(nzchr(df$Element)),
+#     nzchr(df$ElementText),
+#     sep = " | "
+#   )
+# }
+# 
+# # ---------------- Current climate-impact rows + key ----------------
+# cur_clim_idx <- which(grepl("^\\s*Climate impact\\s*$", adaptdata$Element, ignore.case = TRUE))
+# cur_clim <- adaptdata[cur_clim_idx, , drop = FALSE]
+# cur_clim$.key <- make_key(cur_clim)
+# 
+# n_all <- nrow(cur_clim)
+# 
+# # ---------------- Previous climate-impact keys (from CSV) ----------------
+# prev_keys <- character(0)
+# if (file.exists(PREV_CSV)) {
+#   prev_raw <- try(read.csv(PREV_CSV, stringsAsFactors = FALSE), silent = TRUE)
+#   if (!inherits(prev_raw, "try-error")) {
+#     has_cols <- all(c("Country","Document","Element","ElementText") %in% names(prev_raw))
+#     if (has_cols) {
+#       prev_clim <- prev_raw[grepl("^\\s*Climate impact\\s*$", prev_raw$Element, ignore.case = TRUE), , drop = FALSE]
+#       prev_clim$.key <- make_key(prev_clim)
+#       prev_keys <- unique(prev_clim$.key)
+#       message(sprintf("Loaded previous climate rows: %d unique keys.", length(prev_keys)))
+#     } else {
+#       message("⚠ Previous CSV lacks required columns (Country, Document, Element, ElementText); proceeding without exclusions.")
+#     }
+#   } else {
+#     message("⚠ Could not read previous CSV; proceeding without exclusions.")
+#   }
+# } else {
+#   message("⚠ Previous CSV not found; no exclusions will be applied.")
+# }
+# 
+# # ---------------- Remaining = anti-join by content key ----------------
+# remaining_mask <- !(cur_clim$.key %in% prev_keys)
+# remaining_idx_in_cur <- which(remaining_mask)
+# remaining_global_idx  <- cur_clim_idx[remaining_idx_in_cur]
+# n_rem <- length(remaining_global_idx)
+# 
+# 
+# 
+# 
+# message(sprintf("Climate impact rows (current): %d • Already in previous: %d • To extract now: %d",
+#                 n_all, n_all - n_rem, n_rem))
+# 
+# # =================== Extraction (only on remaining) ===================
+# if (n_rem > 0) {
+#   use_progress <- requireNamespace("progress", quietly = TRUE)
+#   if (use_progress) {
+#     pb <- progress::progress_bar$new(
+#       format = paste0("Extracting [:bar] :current/:total (:percent) ETA::eta • model=", MODEL, " • last=:last"),
+#       total = n_rem, clear = FALSE, width = 80
+#     )
+#   }
+#   for (k in seq_along(remaining_global_idx)) {
+#     i <- remaining_global_idx[k]
+#     out <- try(extract_ci_keywords(adaptdata$ElementText[i]), silent = TRUE)
+#     if (inherits(out, "try-error")) {
+#       log_error(paste("Unhandled error:", conditionMessage(attr(out, "condition"))))
+#       out <- NA_character_
+#     }
+#     adaptdata$ClimateImpact_Keywords[i] <- out
+# 
+#     if (use_progress) {
+#       pb$tick(tokens = list(last = substr(ifelse(is.na(out), "NA", out), 1, 28)))
+#     } else if (k %% 10 == 0) {
+#       message(sprintf("... %d/%d done (%.1f%%)", k, n_rem, 100*k/n_rem))
+#     }
+# 
+#     # checkpoint save
+#     if (k %% SAVE_EVERY == 0 || k == n_rem) {
+#       ci_preview_all <- adaptdata %>%
+#         slice(cur_clim_idx) %>%
+#         transmute(
+#           RowID = if ("RowID" %in% names(adaptdata)) RowID else row_number(),
+#           Country, Document,
+#           ElementText = make_preview_html(ElementText),
+#           ClimateImpact_Keywords
+#         )
+#       safe_write_csv(ci_preview_all, OUTPUT_CSV)
+#     }
+#   }
+# }
+# 
+# write.csv(adaptdata,"adaptdata_climateimpact6nano.csv")
+# 
+# # =================== Final preview/export ===================
+# ci_preview_all <- adaptdata %>%
+#   slice(cur_clim_idx) %>%
+#   transmute(
+#     RowID = if ("RowID" %in% names(adaptdata)) RowID else row_number(),
+#     Country, Document,
+#     ElementText = make_preview_html(ElementText),
+#     ClimateImpact_Keywords
+#   )
+# 
+# DT::datatable(
+#   ci_preview_all, escape = FALSE,
+#   caption = paste0("📄 Climate impact — extracted keywords (", RUN_TAG, ", content-key exclusion)"),
+#   options = list(pageLength = 10, dom = "tip")
+# )
+# 
+
+```
+
+
 ## 4.2 Categorization — from phrases to classes
 
 - Phrases are mapped to a fixed set of **impact categories**  
@@ -1089,272 +1344,6 @@ datatable(
 - Rows with only hazards (no consequences) are dropped.  
 - Multiple categories can apply; results stored in `ImpactCategories`.  
 
-
-```{r,echo=FALSE}
-
-# suppressPackageStartupMessages({
-#   library(dplyr)
-#   library(stringr)
-#   library(glue)
-#   library(DT)
-#   library(ellmer)
-#   library(tidyr)
-# })
-# 
-# # =================== Config ===================
-# MODEL             <- "gpt-5-nano"
-# RUN_TAG           <- "gpt5nano"                     # keep the SAME tag used last time
-# OUTPUT_DIR        <- "out"
-# OUTPUT_CSV        <- file.path(OUTPUT_DIR, paste0("climate_impact_keywords_", RUN_TAG, ".csv"))
-# ERROR_LOG         <- file.path(OUTPUT_DIR, paste0("ci_errors_", RUN_TAG, ".log"))
-# SAVE_EVERY        <- 25
-# MAX_CHARS         <- 6000
-# RPM               <- 60
-# 
-# RESUME_FROM_PREV  <- TRUE                           # ✅ read previous CSV and prefill
-# RESET_PREVIOUS    <- FALSE                          # ✅ do NOT wipe already-filled values
-# 
-# # ---- API key (ellmer reads OPENAI_API_KEY) ----
-# btr_key <- Sys.getenv("BTR_KEY")
-# stopifnot("BTR_KEY is not set in your .Renviron (or current env)." = nzchar(btr_key))
-# Sys.setenv(OPENAI_API_KEY = btr_key)
-# 
-# # =================== Utilities ===================
-# dir.create(OUTPUT_DIR, showWarnings = FALSE, recursive = TRUE)
-# 
-# safe_write_csv <- function(df, path) {
-#   tmp <- paste0(path, ".tmp")
-#   ok  <- tryCatch({
-#     utils::write.csv(df, tmp, row.names = FALSE)
-#     TRUE
-#   }, error = function(e) {
-#     message("⚠ write.csv to tmp failed: ", conditionMessage(e)); FALSE
-#   })
-#   if (!ok || !file.exists(tmp)) {
-#     alt <- file.path(dirname(path), paste0("backup_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv"))
-#     utils::write.csv(df, alt, row.names = FALSE)
-#     message("✳ Wrote backup to: ", alt)
-#     return(invisible(FALSE))
-#   }
-#   if (file.exists(path)) suppressWarnings(try(unlink(path), silent = TRUE))
-#   ok2 <- suppressWarnings(try(file.rename(tmp, path), silent = TRUE))
-#   if (identical(ok2, FALSE)) { file.copy(tmp, path, overwrite = TRUE); unlink(tmp) }
-#   TRUE
-# }
-# 
-# log_error <- function(msg) {
-#   try({
-#     cat(sprintf("[%s] %s\n", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), msg),
-#         file = ERROR_LOG, append = TRUE)
-#   }, silent = TRUE)
-# }
-# 
-# make_preview_html <- function(txt) {
-#   ifelse(nchar(txt) > 90,
-#          paste0("<span title='", txt, "'>", substr(txt, 1, 90), "...</span>"),
-#          txt)
-# }
-# 
-# clip_text <- function(x, max_chars = MAX_CHARS) {
-#   if (is.na(x) || !nzchar(x) || nchar(x) <= max_chars) return(x)
-#   head <- substr(x, 1, round(max_chars * 0.7))
-#   tail <- substr(x, nchar(x) - round(max_chars * 0.3) + 1, nchar(x))
-#   paste0(head, "\n...\n", tail)
-# }
-# 
-# make_ci_prompt <- function(txt) {
-#   glue::glue(
-# 'Read the "Climate impact" passage.
-# 
-# Extract short key keywords that describe the CONSEQUENCES/IMPACTS of climate (what happens to people, ecosystems, services, assets).
-# Rules:
-# - Use EXACT short phrases from the text (same language).
-# - Examples: "water shortage"; "crop yield loss"; "infrastructure damage"; "heat-related illness"; "biodiversity loss"; "coastal erosion".
-# - Exclude drivers/hazards (e.g., "heat wave", "drought") unless the text itself presents them as the impact (e.g., "increased flooding").
-# - Exclude actions/measures (e.g., "irrigation expansion", "early warning system").
-# - Return ONE line only: keywords separated by "; ".
-# 
-# TEXT:
-# """{clip_text(txt)}"""'
-#   )
-# }
-# 
-# rate_wrap <- function(f) f
-# if (is.finite(RPM) && requireNamespace("ratelimitr", quietly = TRUE)) {
-#   rate_wrap <- function(f) ratelimitr::limit_rate(f, ratelimitr::rate(n = RPM, period = 60))
-# }
-# 
-# chat_client <- ellmer::chat_openai(model = MODEL)
-# extract_once <- function(txt) chat_client$chat(make_ci_prompt(txt))
-# 
-# extract_ci_keywords <- rate_wrap(function(txt) {
-#   if (is.na(txt) || !nzchar(txt)) return(NA_character_)
-#   tries <- 0; last_err <- ""
-#   repeat {
-#     tries <- tries + 1
-#     out <- try(extract_once(txt), silent = TRUE)
-#     if (!inherits(out, "try-error")) {
-#       out <- trimws(out)
-#       return(if (nzchar(out)) out else NA_character_)
-#     }
-#     last_err <- conditionMessage(attr(out, "condition"))
-#     if (grepl("context|token|length|too long|maximum", last_err, ignore.case = TRUE)) {
-#       txt <- clip_text(txt, max_chars = round(MAX_CHARS * 0.7))
-#     }
-#     if (tries >= 5) { log_error(paste("API error after retries:", last_err)); return(NA_character_) }
-#     Sys.sleep(min(runif(1, 1, 2) * (2^(tries - 1)), 30))
-#   }
-# })
-# 
-# # =================== Prepare data ===================
-# if (!"RowID" %in% names(adaptdata)) adaptdata$RowID <- seq_len(nrow(adaptdata))
-# if (!"ClimateImpact_Keywords" %in% names(adaptdata)) adaptdata$ClimateImpact_Keywords <- NA_character_
-# 
-# ci_idx_all <- which(grepl("^\\s*Climate impact\\s*$", adaptdata$Element, ignore.case = TRUE))
-# n_all <- length(ci_idx_all)
-# 
-# # Do NOT wipe previous values — we want to resume
-# if (RESET_PREVIOUS) {
-#   adaptdata$ClimateImpact_Keywords[ci_idx_all] <- NA_character_
-# }
-# 
-# key_df <- adaptdata |>
-#   slice(ci_idx_all) |>
-#   transmute(RowID = RowID,
-#             Country,
-#             Document,
-#             ElementText,
-#             ElementText_short = make_preview_html(ElementText))
-# 
-# # ========= Load previous CSV (resume) when requested =========
-# if (RESUME_FROM_PREV && file.exists(OUTPUT_CSV)) {
-#   prev <- try(read.csv(OUTPUT_CSV, stringsAsFactors = FALSE), silent = TRUE)
-#   if (!inherits(prev, "try-error")) {
-#     if (!"RowID" %in% names(prev)) {
-#       prev <- prev |>
-#         rename(ElementText_short = ElementText) |>
-#         mutate(RowID = NA_integer_)
-#       key_join <- key_df |>
-#         left_join(prev[, c("Country","Document","ElementText_short","ClimateImpact_Keywords")],
-#                   by = c("Country","Document","ElementText_short"))
-#     } else {
-#       key_join <- key_df |>
-#         left_join(prev[, c("RowID","ClimateImpact_Keywords")], by = "RowID")
-#     }
-#     filled <- !is.na(key_join$ClimateImpact_Keywords)
-#     if (any(filled)) {
-#       adaptdata$ClimateImpact_Keywords[match(key_join$RowID[filled], adaptdata$RowID)] <- key_join$ClimateImpact_Keywords[filled]
-#       message(sprintf("✔ Loaded %d previously extracted rows from CSV (RESUME_FROM_PREV=TRUE).", sum(filled)))
-#     }
-#   } else {
-#     message("⚠ Could not read existing CSV; continuing without it.")
-#   }
-# } else if (RESUME_FROM_PREV && !file.exists(OUTPUT_CSV)) {
-#   message("⚠ RESUME_FROM_PREV=TRUE but OUTPUT_CSV not found: ", OUTPUT_CSV)
-#   # (Optional) auto-pick most recent prior CSV
-#   cand <- list.files(OUTPUT_DIR, pattern = "^climate_impact_keywords_.*\\.csv$", full.names = TRUE)
-#   if (length(cand)) {
-#     OUTPUT_CSV <- cand[which.max(file.info(cand)$mtime)]
-#     message("↪ Resuming from: ", basename(OUTPUT_CSV))
-#     prev <- try(read.csv(OUTPUT_CSV, stringsAsFactors = FALSE), silent = TRUE)
-#     if (!inherits(prev, "try-error")) {
-#       if (!"RowID" %in% names(prev)) {
-#         prev <- prev |>
-#           rename(ElementText_short = ElementText) |>
-#           mutate(RowID = NA_integer_)
-#         key_join <- key_df |>
-#           left_join(prev[, c("Country","Document","ElementText_short","ClimateImpact_Keywords")],
-#                     by = c("Country","Document","ElementText_short"))
-#       } else {
-#         key_join <- key_df |>
-#           left_join(prev[, c("RowID","ClimateImpact_Keywords")], by = "RowID")
-#       }
-#       filled <- !is.na(key_join$ClimateImpact_Keywords)
-#       if (any(filled)) {
-#         adaptdata$ClimateImpact_Keywords[match(key_join$RowID[filled], adaptdata$RowID)] <- key_join$ClimateImpact_Keywords[filled]
-#         message(sprintf("✔ Loaded %d previously extracted rows from auto-selected CSV.", sum(filled)))
-#       }
-#     }
-#   } else {
-#     message("⏭ No prior CSVs found; proceeding without resume.")
-#   }
-# } else {
-#   message("⏭ Skipping previous CSV load (RESUME_FROM_PREV=FALSE).")
-# }
-# 
-# # =================== Process remaining ===================
-# remaining_rowids <- key_df$RowID[is.na(adaptdata$ClimateImpact_Keywords[match(key_df$RowID, adaptdata$RowID)])]
-# n_rem <- length(remaining_rowids)
-# message(sprintf("Target rows: %d • Already filled: %d • Remaining: %d",
-#                 n_all, n_all - n_rem, n_rem))
-# 
-# if (n_rem > 0) {
-#   use_progress <- requireNamespace("progress", quietly = TRUE)
-#   if (use_progress) {
-#     pb <- progress::progress_bar$new(
-#       format = paste0("Extracting [:bar] :current/:total (:percent) ETA::eta • model=", MODEL, " • last=:last"),
-#       total = n_rem, clear = FALSE, width = 80
-#     )
-#   }
-# 
-#   for (j in seq_along(remaining_rowids)) {
-#     rid <- remaining_rowids[j]
-#     i <- match(rid, adaptdata$RowID)
-#     txt <- adaptdata$ElementText[i]
-# 
-#     out <- try(extract_ci_keywords(txt), silent = TRUE)
-#     if (inherits(out, "try-error")) {
-#       msg <- conditionMessage(attr(out, "condition"))
-#       log_error(paste("Unhandled error:", msg))
-#       out <- NA_character_
-#     }
-#     adaptdata$ClimateImpact_Keywords[i] <- out
-# 
-#     if (use_progress) {
-#       pb$tick(tokens = list(last = substr(ifelse(is.na(out), "NA", out), 1, 28)))
-#     } else if (j %% 10 == 0) {
-#       message(sprintf("... %d/%d done (%.1f%%)", j, n_rem, 100*j/n_rem))
-#     }
-# 
-#     # Autosave checkpoint (atomic) — writes ONLY to this run's CSV
-#     if (j %% SAVE_EVERY == 0 || j == n_rem) {
-#       ci_preview_all <- adaptdata |>
-#         slice(ci_idx_all) |>
-#         transmute(RowID,
-#                   Country, Document,
-#                   ElementText = make_preview_html(ElementText),
-#                   ClimateImpact_Keywords)
-#       safe_write_csv(ci_preview_all, OUTPUT_CSV)
-#     }
-#   }
-# }
-# 
-# # =================== Final preview/export ===================
-# ci_preview_all <- adaptdata |>
-#   slice(ci_idx_all) |>
-#   transmute(RowID,
-#             Country, Document,
-#             ElementText = make_preview_html(ElementText),
-#             ClimateImpact_Keywords)
-# 
-# DT::datatable(
-#   ci_preview_all, escape = FALSE,
-#   caption = paste0("📄 Climate impact — extracted keywords (", RUN_TAG, ", resume-safe)"),
-#   options = list(pageLength = 10, dom = "tip")
-# )
-# 
-# # Final save (to the run-tagged CSV only)
-# safe_write_csv(ci_preview_all, OUTPUT_CSV)
-# 
-# n_na <- sum(is.na(adaptdata$ClimateImpact_Keywords[ci_idx_all]))
-# message(sprintf("Done. NA after run: %d of %d target rows.", n_na, n_all))
-# if (file.exists(ERROR_LOG)) {
-#   message("Some errors were logged to: ", ERROR_LOG)
-# }
-
-```
-
-
 ```{r,echo=FALSE}
 # ---- Category table for climate impacts (consequences only) ----
 suppressPackageStartupMessages({
@@ -1384,7 +1373,7 @@ impact_categories <- tribble(
   health\\s+of\\s+(?:livestock|animals?|cattle|herds?)|losses in livestock|
   loss(?:es)?\\s+in\\s+(?:livestock|animals?|cattle|herds?)|
   (?:feed|fodder)\\s+(?:shortage|shortages|scarcity|deficit|crisis)|
-  cattle\\s+(?:killed|loss(?:es)?)
+  cattle\\s+(?:killed|loss(?:es)?|head of cattle)
 )\\b",
 
 
@@ -1394,7 +1383,7 @@ impact_categories <- tribble(
 
   "Food security & nutrition decline",
   "food insecurity/shortage; supply disruptions; hunger; malnutrition/undernutrition; food price spikes/inflation",
-  "(?i)\\b(food (insecurity|security (declin|worsen)|shortage|shortages|scarcity|food access|supply (disrupt|disruption))|hunger|grain protein content|malnutrition|under\\s?nutrition|nutrition(?:al)? status (declin|worsen)|food yield instability|food accessibility|food price(s)? (spike|increase|increases|inflation|fluctuation(s)?))\\b",
+  "(?i)\\b(food (insecurity|security (declin|worsen)|shortage|shortages|scarcity|food access|supply (disrupt|disruption))|hunger|grain protein content|food security|malnutrition|under\\s?nutrition|nutrition(?:al)? status (declin|worsen)|food yield instability|food accessibility|food price(s)? (spike|increase|increases|inflation|fluctuation(s)?))\\b",
 
   "Human health burden",
   "heat-related illness/illnesses/heatstroke;heat-related conditions; respiratory issues; health issues;poor health; allergy; cardiovascular/kidney stress; morbidity;diarrhea; vector-/water-/food-borne disease; diarrhoeal disease;virus; UHI",
@@ -1443,7 +1432,7 @@ impact_categories <- tribble(
 
   "Economic & livelihood losses",
   "GDP loss; economic losses/costs; productivity loss; labor productivity decline; livelihood/income/job loss; losses & damages; operating/compliance costs; price spikes",
-  "(?i)\\b(GDP\\b|economic (loss|losses|damage|damages|costs)|destroyed several farm|socio-economic impact|rural livelihoods|property losses|productivity (loss|declin|reduct)|decreas(?:e|ed|ing) (labor|worker) productivity|livelihood(s)? (loss|impact)|homes damaged|socio-economic|homes|income (loss|declin)|job(s)? (loss|cuts)|financial losses|losses? and damages?|operational cost(s)? (increase|increases)|property damage|employment|job|jobs|livelihoods|poor housing conditions|social and economic effects|food prices|damage to property|precarious location|local economies|compliance cost(s)? (increase|increases)|price (spike|spikes|increase|increases|fluctuation(s)?))\\b",
+  "(?i)\\b(GDP\\b|economic (loss|losses|damage|damages|costs)|destroyed several farm|socio-economic impact|rural livelihoods|property losses|productivity (loss|declin|reduct)|decreas(?:e|ed|ing) (labor|worker) productivity|livelihood(s)? (loss|impact)|homes damaged|socio-economic|homes|income (loss|declin)|job(s)? (loss|cuts)|financial losses|losses? and damages?|operational cost(s)? (increase|increases)|property damage|employment|job|jobs|livelihoods|poor housing conditions|social and economic effects|food prices|damage to property|precarious location|local economies|compliance cost(s)? (increase|increases)|price (spike|spikes|increase|increases|fluctuation(s)?|$|USD))\\b",
 
   "Tourism & recreation impacts",
   "reduced tourist numbers; shorter/shortened snow season; coastal tourism loss; tourism revenue decline; visitors discouraged;outdoor activities; shorter stays; outdoor activities hindered;reduce tourist numbers;shorten average stays",
@@ -1484,7 +1473,7 @@ impact_categories <- tribble(
 
   "Coastal inundation & shoreline erosion",
   "coastal erosion/retreat; shoreline retreat; permanent inundation; coastal/storm-surge flooding; land loss to sea; tidal/nuisance flooding; below the high tide line",
-  "(?i)\\b(coastal (erosion|retreat|inundation|flood(ing)?)|shoreline (retreat|erosion)|beach (erosion|loss)|land loss (to|from) the sea|sea level|Sea-level rise|level of the sea|sea levels|coastal|sea level rise|permanent inundation|storm surge (inundation|flood(ing)?)|tidal flooding|nuisance flooding|below the high tide line)\\b",
+  "(?i)\\b(coastal (erosion|retreat|inundation|flood(ing)?)|shoreline (retreat|erosion)|beach (erosion|loss)|land loss (to|from) the sea|sea level|Sea-level rise|level of the sea|sea levels|sea level rise|permanent inundation|storm surge (inundation|flood(ing)?)|tidal flooding|nuisance flooding|below the high tide line)\\b",
 
   "Cryosphere degradation & ground instability",
   "permafrost thaw/degradation; active layer thickening; thermokarst; ground subsidence/instability; frost heave; glacier melt/retreat; reduced snow cover",
@@ -1557,7 +1546,7 @@ impact_categories <- ensure_keywords_covered(impact_categories)
 # ---- Matching helpers & pipeline ----
 
 # Read your extracted keywords file
-adaptdata <- read_csv("adaptdata_climateimpact5nano.csv")
+adaptdata <- read_csv("adaptdata_climateimpact6nano.csv")
 
 # Sanity check
 stopifnot(exists("impact_categories"),
@@ -1603,22 +1592,112 @@ adaptdata <- adaptdata %>%
 coverage <- mean(!is.na(adaptdata$ImpactCategories))
 message(sprintf("Impact categorization coverage: %.1f %%", 100 * coverage))
 
-# Optional: write out the categorized file
-# write_csv(adaptdata, "adaptdata_climate_impact_categorized.csv")
 
-# Quick export for spot-checking
-write.csv(adaptdata, "adaptdata_climateimpact5nano_cat.csv", row.names = FALSE)
+```
+
+## 4.3 include the relevant system at risk rows
+
+```{r,echo=FALSE}
+suppressPackageStartupMessages({
+  library(dplyr); library(stringr); library(purrr); library(tibble); library(readr); library(rlang)
+})
+
+# Preconditions: already defined: impact_categories, clean_ci_text(), categorize_ci_vector(), adaptdata
+stopifnot(
+  exists("impact_categories"),
+  all(c("Category","Regex","Keywords") %in% names(impact_categories)),
+  exists("categorize_ci_vector"),
+  exists("clean_ci_text"),
+  exists("adaptdata")
+)
+
+# -- Pull System-at-risk rows (case-insensitive)
+sys <- adaptdata %>%
+  filter(tolower(Element) == "system at risk")
+
+# -- Keep SAR rows whose ElementLabel suggests impacts/risks or hazards
+impactish_rx <- regex(
+  "(?i)\\b(impact(s)?|risk(s)?|vulnerab|disaster(s)?|observed impacts?|projected impacts?|impacts?[,\\s]+risks?|risks?[,\\s]+vulnerab|vulnerability (and|&)? impacts?)\\b",
+  ignore_case = TRUE
+)
+hazardish_rx <- regex(
+  "(?i)\\b(flood(s|ing)?|drought(s)?|heat( wave(s)?)?|heavy precipitation|precipitation( patterns| projections)?|rain(fall)?|cyclone(s)?|tropical cyclones?|sea level rise|coastal erosion|forest fire(s)?|glacier(|s| retreat(s)?)|desertification|dust( and)? sandstorm(s)?|water scarcity|temperature(s)?|heatwaves?)\\b",
+  ignore_case = TRUE
+)
+
+sys_filt <- sys %>%
+  mutate(.ElementLabel = coalesce(as.character(ElementLabel), "")) %>%
+  filter(str_detect(.ElementLabel, impactish_rx) | str_detect(.ElementLabel, hazardish_rx)) %>%
+  select(-.ElementLabel)
+
+# -- Build a unified text column to scan (prefer ElementText, then ElementText_MAN)
+text_choices <- intersect(c("ElementText", "ElementText_MAN"), names(sys_filt))
+if (length(text_choices) == 0L) stop("No ElementText or ElementText_MAN present for System-at-risk rows.")
+
+sys_filt <- sys_filt %>%
+  mutate(
+    .TextForScan = if (length(text_choices) == 1L)
+      .data[[text_choices]]
+    else
+      coalesce(!!!rlang::syms(text_choices)),
+    .TextForScan = na_if(as.character(.TextForScan), ""),
+    .TextForScan = clean_ci_text(.TextForScan)
+  )
+
+# -- Categorize using your climate-impact regex map (drops hazard-only text internally)
+sys_with_impacts <- sys_filt %>%
+  mutate(ImpactCategories = categorize_ci_vector(.TextForScan, map = impact_categories, drop_hazard_only = TRUE)) %>%
+  filter(!is.na(ImpactCategories)) %>%
+  select(-.TextForScan)
+
+# -- If nothing matched, keep original and warn; otherwise clone as Climate impact
+if (nrow(sys_with_impacts) == 0L) {
+  warning("No System-at-risk rows yielded consequence categories from ElementText; no clones created.")
+  adaptdata_augmented <- adaptdata
+} else {
+  # Ensure these columns exist on base
+  if (!"ImpactCategories" %in% names(adaptdata))       adaptdata <- mutate(adaptdata, ImpactCategories = NA_character_)
+  if (!"From_SystemAtRisk" %in% names(adaptdata))      adaptdata <- mutate(adaptdata, From_SystemAtRisk = NA)
+  if (!"Source_ElementLabel" %in% names(adaptdata))    adaptdata <- mutate(adaptdata, Source_ElementLabel = NA_character_)
+
+  # Clone rows with provenance
+  sys_as_ci <- sys_with_impacts %>%
+    mutate(
+      Element = "Climate impact",
+      From_SystemAtRisk = TRUE,
+      Source_ElementLabel = as.character(ElementLabel)
+    )
+
+  # Column harmonization both ways
+  missing_in_clone <- setdiff(names(adaptdata), names(sys_as_ci))
+  if (length(missing_in_clone)) {
+    sys_as_ci <- bind_cols(sys_as_ci,
+      as_tibble(setNames(replicate(length(missing_in_clone), NA, simplify = FALSE), missing_in_clone)))
+  }
+  missing_in_base <- setdiff(names(sys_as_ci), names(adaptdata))
+  if (length(missing_in_base)) {
+    adaptdata <- bind_cols(adaptdata,
+      as_tibble(setNames(replicate(length(missing_in_base), NA, simplify = FALSE), missing_in_base)))
+  }
+
+  # Bind and report
+  adaptdata <- bind_rows(adaptdata, sys_as_ci)
+}
+
+
+
+write.csv(adaptdata, "adaptdata_climateimpact6nano_cat_sys.csv", row.names = FALSE)
 
 
 ```
 
-## 4.3 Climate impact summary data 
+## 4.4 Climate impact summary data 
+# load manual data after check
 
 ```{r,echo=FALSE}
 
 #load manualy checked data
-
-adaptdata <- read_csv("adaptdata_climateimpact5nano_manualcheck.csv")
+adaptdata <- read_csv("adaptdata_climateimpact6nano_cat_sys.csv")
 
 # 1. Filter and separate multiple SystemType values
 impact_counts <- adaptdata %>%
@@ -1667,151 +1746,72 @@ system_plot
 
 
 ```
+# Step 4.5 : Raw data 
 
-# Step 5 : Action level and type
-## 5.1 Action level
-
-## Step X: Action Level classification
-
-**Goal.** Distinguish whether each *Action* reported is **preparatory groundwork** or a **substantive adaptation measure**.
-
-**Definitions**
-
-- **Groundwork** — upstream or enabling work such as:
-  - impact/vulnerability assessments, scenarios, conceptual tools  
-  - policy recommendations, planning frameworks  
-- **Substantive action** — concrete measures such as:
-  - organizational development, regulations, awareness/outreach, education/training  
-  - monitoring/MEL, infrastructure, technology/innovation  
-  - financial mechanisms, resource transfer, funding  
-
-**Method**
-
-- GPT reads each *Action* text and must return **exactly one label**: *Groundwork* or *Substantive action*.  
-- If no clear match, the model returns `NA`.  
-- The result is stored in `ActionLevel_GPT` and previewed in a datatable.  
-
-
+This show 10 random rows for each climate impact categories. The raw text is included as well as the keywords that justifiy the category. 
 
 ```{r,echo=FALSE}
-# # ====================== Step X: Action Level (GPT) ======================
-# # Classify Element == "Action" into ONE of:
-# #   Groundwork | Substantive action
-# # Uses ellmer::chat_openai ONLY and BTR_KEY for auth.
-# 
-# suppressPackageStartupMessages({
-#   library(dplyr)
-#   library(stringr)
-#   library(glue)
-#   library(DT)
-#   library(ellmer)
-# })
-# 
-# # ---- API key: force BTR_KEY for this session ----
-# btr_key <- Sys.getenv("BTR_KEY")
-# stopifnot("BTR_KEY is not set in your environment." = nzchar(btr_key))
-# Sys.setenv(OPENAI_API_KEY = btr_key)  # ellmer reads this
-# 
-# # ---- Model ----
-# ACT_LEVEL_MODEL <- "gpt-5-nano"
-# 
-# # ---- Allowed labels ----
-# ACTION_LEVEL_LABELS <- c("Groundwork", "Substantive action")
-# 
-# # ---- Prompt (definitions + strict output) ----
-# make_action_level_prompt <- function(txt) {
-#   glue::glue(
-# "Decide the *Action level* for the passage. Choose ONE label only.
-# 
-# Allowed labels:
-# - Groundwork — preparatory work (e.g., scenarios, impact/vulnerability assessment, conceptual tools, policy recommendations).
-# - Substantive action — concrete adaptation actions (e.g., organizational development, regulations, public and raising awareness/outreach/capacity building/education, surveillance/monitoring/MEL, infrastructure/technology/innovation, resource transfer/financial mechanisms,funding, financing or co financing).
-# 
-# Rules:
-# - Think silently if the action is concrete or abstract; do NOT show your reasoning.
-# - Output exactly ONE label from the list above.
-# - If none fit, return 'NA'.
-# 
-# TEXT:
-# \"\"\"{txt}\"\"\""
-#   )
-# }
-# 
-# # ---- Single-call classifier (ONE label) ----
-# classify_action_level <- function(txt, model = ACT_LEVEL_MODEL) {
-#   if (is.na(txt) || !nzchar(txt)) return(NA_character_)
-#   ans <- tryCatch(
-#     ellmer::chat_openai(model = model)$chat(make_action_level_prompt(txt)),
-#     error = function(e) e
-#   )
-#   if (inherits(ans, "error")) {
-#     warning("GPT call failed: ", conditionMessage(ans))
-#     return(NA_character_)
-#   }
-#   raw <- trimws(ans)
-#   if (!nzchar(raw) || toupper(raw) == "NA") return(NA_character_)
-#   # Canonicalize to allowed label (case-insensitive)
-#   hit <- ACTION_LEVEL_LABELS[tolower(ACTION_LEVEL_LABELS) == tolower(raw)]
-#   if (!length(hit)) return(NA_character_)
-#   hit
-# }
-# 
-# # ---- Run on Action rows ----
-# if (!"ActionLevel_GPT" %in% names(adaptdata)) adaptdata$ActionLevel_GPT <- NA_character_
-# 
-# act_idx <- which(grepl("^\\s*action\\s*$", adaptdata$Element, ignore.case = TRUE))
-# if (length(act_idx)) {
-#   cat("Classifying Action Level for", length(act_idx), "rows...\n")
-#   pb <- txtProgressBar(min = 0, max = length(act_idx), style = 3)
-#   for (i in seq_along(act_idx)) {
-#     r <- act_idx[i]
-#     adaptdata$ActionLevel_GPT[r] <- classify_action_level(adaptdata$ElementText[r])
-#     setTxtProgressBar(pb, i)
-#   }
-#   close(pb)
-# } else {
-#   cat("No rows with Element == 'Action' found.\n")
-# }
-# 
-# # ---- Preview ----
-# preview_level <- adaptdata %>%
-#   filter(grepl("^\\s*action\\s*$", Element, ignore.case = TRUE)) %>%
-#   transmute(
-#     Country, Document,
-#     ElementText = ifelse(is.na(ElementText), "",
-#                          ifelse(nchar(ElementText) > 120,
-#                                 paste0("<span title='", ElementText, "'>", substr(ElementText, 1, 120), "...</span>"),
-#                                 ElementText)),
-#     ActionLevel_GPT
-#   )
-# 
-# DT::datatable(
-#   preview_level, escape = FALSE,
-#   caption = "🧭 Action level (Groundwork vs Substantive) — GPT",
-#   options = list(pageLength = 10, autoWidth = TRUE, dom = "tip")
-# )
-# 
-# # Optional export
-# write.csv(preview_level, "action_level_gpt_preview.csv", row.names = FALSE)
-# write.csv(adaptdata,"adaptdata_action_level.csv")
+# ---- Random DT: 10 samples per impact category ----
+suppressPackageStartupMessages({
+  library(dplyr); library(stringr); library(tidyr); library(DT)
+})
+
+# Small helper to preview long text with tooltip (keeps your earlier style)
+make_preview_html <- function(txt, n = 140) {
+  ifelse(
+    is.na(txt) | !nzchar(txt), "",
+    ifelse(
+      nchar(txt) > n,
+      paste0("<span title='", txt, "'>", substr(txt, 1, n), "...</span>"),
+      txt
+    )
+  )
+}
+
+set.seed(123)  # set for reproducibility; change or remove if you want fresh samples each run
+
+ci_base <- adaptdata %>%
+  filter(grepl("^\\s*climate impact\\s*$", Element, ignore.case = TRUE),
+         !is.na(ImpactCategories), str_detect(ImpactCategories, "\\S")) %>%
+  mutate(
+    ElementText_Preview = make_preview_html(ElementText),
+    AllCategories = ImpactCategories           # keep the full categories list before we unnest
+  )
+
+# Unnest to one row per (row x category), then sample up to 10 per category
+sampled_by_cat <- ci_base %>%
+  separate_rows(ImpactCategories, sep = ";") %>%
+  mutate(ImpactCategories = str_squish(ImpactCategories)) %>%
+  filter(ImpactCategories != "") %>%
+  group_by(ImpactCategories) %>%
+  slice_sample(prop = 1) %>%              # shuffle within each group
+  slice_head(n = 10) %>%                  # take first 10 (or fewer)
+  ungroup() %>%
+  arrange(ImpactCategories)
+
+# Build the DT
+DT::datatable(
+  sampled_by_cat %>%
+    transmute(
+      `Impact Category` = ImpactCategories,
+      `Element Text`    = ElementText_Preview,
+      `Extracted Keywords` = ClimateImpact_Keywords,
+      `All Selected Categories` = AllCategories
+    ),
+  escape = FALSE,  # allow the tooltip/preview HTML
+  caption = "🎯 Climate impact — random 10 samples per category (shows element text, extracted keywords, and selected categories)",
+  options = list(pageLength = 10, autoWidth = TRUE, dom = "tip")
+)
+
 ```
 
-## 5.2 Action type
+# Step 5 : Action level and type
+
+## 5.1 Action type
 
 **Goal.** Tag each *Action* with a single **type** to describe the primary adaptation approach.
 
-**Types (one label only)**
 
-- **Infrastructural/ technological** — building or upgrading assets and systems; deploying tech or tools.  
-  *E.g., flood defenses, retrofits, sensors, drought-resistant irrigation.*
-- **Behavioral/ cultural** — influencing practices and norms.  
-  *E.g., public awareness, training, behavior change campaigns.*
-- **Institutional** — strengthening rules, mandates, coordination, and org capacity.  
-  *E.g., policies, plans, regulatory updates, new units/committees.*
-- **Ecosystem-based** — conserving, restoring, or using ecosystems for risk reduction.  
-  *E.g., mangrove restoration, watershed rehab, green infrastructure.*
-- **Economic/financial** — funding flows and incentives.  
-  *E.g., subsidies, insurance, green bonds, grants, resource transfers.*
 
 **Method**
 
@@ -1820,11 +1820,6 @@ system_plot
 
 
 ```{r,echo=FALSE}
-# # ====================== Step Y: Action Type (GPT) ======================
-# # Classify Element == "Action" into ONE of:
-# #   Infrastructural/ technological | Behavioral/ cultural | Institutional | Ecosystem-based | Economic/financial
-adaptdata<- read_csv("adaptdata_action_level.csv")
-# 
 # suppressPackageStartupMessages({
 #   library(dplyr)
 #   library(stringr)
@@ -1833,175 +1828,336 @@ adaptdata<- read_csv("adaptdata_action_level.csv")
 #   library(ellmer)
 # })
 # 
-# # ---- API key: force BTR_KEY again (safe if repeated) ----
-# btr_key <- Sys.getenv("BTR_KEY")
-# stopifnot("BTR_KEY is not set in your environment." = nzchar(btr_key))
-# Sys.setenv(OPENAI_API_KEY = btr_key)
+# # ---------------- Config ----------------
+# INTERVENTION_TYPE_MODEL <- "gpt-5-nano"
 # 
-# # ---- Model ----
-# ACT_TYPE_MODEL <- "gpt-5-nano"
-# 
-# # ---- Allowed labels ----
-# ACTION_TYPE_LABELS <- c(
-#   "Infrastructural/ technological",
-#   "Behavioral/ cultural",
-#   "Institutional",
-#   "Ecosystem-based",
-#   "Economic/financial"
+# # Your intervention_type vocabulary (2nd column)
+# INTERVENTION_TYPE_LABELS <- c(
+#   # ecosystem based
+#   "biodiversity development","ecological restoration","green infrastructure","agroforestry","animals",
+#   "crop diversification","energy","migration","nutrient management","pest and disease management",
+#   "postharvest","schedule modification","soil management","water management",
+#   # institutional
+#   "economic","government policies and programs","laws and regulations","research development",
+#   # social
+#   "behavioural","educational","informational","economic",  # 'economic' also appears under social
+#   # infrastructure / structural / physical
+#   "engineered and built environment","services","supply-chain improvement","technological",
+#   # misc
+#   "uncategorized"
 # )
 # 
-# # ---- Prompt (definitions + strict output) ----
-# make_action_type_prompt <- function(txt) {
+# # Canonicalize model output to your exact intervention_type labels
+# canonicalize_intervention_type <- function(x) {
+#   if (is.null(x) || is.na(x)) return(NA_character_)
+#   raw <- tolower(trimws(x))
+#   raw <- gsub("[[:punct:]]+$", "", raw)
+#   raw <- gsub("\\s+", " ", raw)
+# 
+#   # common variants / spellings
+#   map <- list(
+#     "green infrastructure" = c("green infrastructure","nature-based infrastructure","nature based infrastructure","gi"),
+#     "pest and disease management" = c("pest & disease management","pest management","disease and pest management","ipm","integrated pest management"),
+#     "government policies and programs" = c("government policies and programs","government policies & programs","policies and programs","govt policies and programs"),
+#     "laws and regulations" = c("laws and regulations","laws & regulations","regulations and laws"),
+#     "supply-chain improvement" = c("supply chain improvement","supply-chain improvement","supply chain"),
+#     "engineered and built environment" = c("engineered and built environment","built environment","engineered/built environment","infrastructure works"),
+#     "soil management" = c("soil management","soil practices"),
+#     "water management" = c("water management","water resources management"),
+#     "research development" = c("research development","research & development","r&d"),
+#     "behavioural" = c("behavioural","behavioral"),
+#     "postharvest" = c("postharvest","post-harvest","post harvest"),
+#     "nutrient management" = c("nutrient management","fertility management"),
+#     "crop diversification" = c("crop diversification","diversification"),
+#     "technological" = c("technological","technology","tech"),
+#     "educational" = c("educational","education","training & education"),
+#     "informational" = c("informational","information services","information","climate services"),
+#     "biodiversity development" = c("biodiversity development","biodiversity"),
+#     "ecological restoration" = c("ecological restoration","ecosystem restoration"),
+#     "agroforestry" = c("agroforestry","agro-forestry"),
+#     "services" = c("services","service delivery"),
+#     "animals" = c("animals","livestock","aquaculture")
+#   )
+#   for (k in names(map)) if (raw %in% map[[k]]) return(k)
+# 
+#   # exact match fallback
+#   hit <- INTERVENTION_TYPE_LABELS[tolower(INTERVENTION_TYPE_LABELS) == raw]
+#   if (length(hit)) return(hit)
+# 
+#   NA_character_
+# }
+# 
+# # -------- Prompt: classify at the intervention_type level only (BATCH) --------
+# make_intervention_type_batch_prompt <- function(txts) {
 #   glue::glue(
-# "Decide the *Action type* for the passage. Choose ONE label only.
+# "Task: Classify each passage into exactly ONE **intervention_type** label from the list below.
+# Return N lines, one per input, in the same order. Output only the label string, no punctuation, no explanation.
 # 
-# Allowed labels:
-# - Infrastructural/ technological — enabling or implementing technology or infrastructure development.
-# - Behavioral/ cultural — enabling or implementing lifestyle/behavioural change.
-# - Institutional — improving the institutional/organizational context (policies, plans, org structures).
-# - Ecosystem-based — enhancing/protecting/promoting ecosystem services and products.
-# - Economic/financial — finance instruments, incentives, resource transfers, funding mechanisms.
+# Allowed intervention_type labels (definitions + examples):
 # 
-# Rules:
-# - Think silently; do NOT show your reasoning.
-# - Output exactly ONE label from the list above.
-# - If none fit, return 'NA'.
 # 
-# TEXT:
-# \"\"\"{txt}\"\"\""
+# - biodiversity development: interventions that enhance/maintain biodiversity and ecological connectivity.
+#   e.g., ecological buffer zones, ecological corridors, pollination support.
+# - ecological restoration: restore degraded ecosystems.
+#   e.g., re/afforestation, wetland & floodplain conservation, reduced-impact logging, sustainable fishing, forested catchment protection.
+# - green infrastructure: vegetated or permeable systems for cooling, stormwater, habitat.
+#   e.g., green/blue/white roofs, green walls, bioswales, porous pavements, rain gardens, green alleys, urban parks/forestry, river parks, community/urban/peri-urban agriculture.
+# - agroforestry: trees/woody perennials integrated with crops/livestock.
+#   e.g., alley cropping, windbreaks/hedgerows, multistrata systems, parklands, boundary planting, agroforestry pruning variants.
+# - animals: livestock/aquaculture health, feed, manure & pasture systems.
+#   e.g., parasite control, vaccination programs, feed addition/processing/substitution, manure collection/storage/treatment, silvopasture, agropastoralism, aquasilviculture, herd mobility/diversification.
+# - crop diversification: intercrops/rotations (legume vs non-legume variants).
+# - energy: biogas, cookstove switching, improved cookstoves.
+# - migration: relocating crops/livestock in response to climate.
+# - nutrient management: organic inputs and related practices.
+#   e.g., compost, manure, biosolids, kraaling/parcage.
+# - pest and disease management: integrated/bio/mechanical/chemical controls.
+#   e.g., IPM, biological control, biopesticides, mechanical/physical methods.
+# - postharvest: harvest technique & storage improvements (drying, PICs bags, fumigation).
+# - schedule modification: change planting/harvest timing.
+# - soil management: biochar, mulches, residue management/incorporation, green manures, reduced/minimum/zero tillage, improved fallows.
+# - water management: irrigation & water harvesting/handling.
+#   e.g., AWD/midseason drainage in rice, supplemental irrigation, bunds, zai pits, terraces, planting basins, stone rows, microcatchments, water tanks, desalination,water management, water storage fog harvesting, groundwater extraction.
+# 
+# 
+# - economic: finance & incentive instruments and resource transfers.
+#   e.g., loans/credit lines/soft or subordinated loans, guarantees, grants (incl. performance-based), catastrophe/impact bonds, equity (listed/private, junior), insurance (crop/livestock/production/market-price), PES, securitised investments, policy incentives/subsidies/certification, development aid, planning grants.
+# - government policies and programs: public strategies & programs across levels.
+#   e.g., city/district/regional/national/sub-national adaptation plans, municipal water programs, sector plans, urban upgrading programs, local adaptation plans.
+# - laws and regulations: binding rules & rights.
+#   e.g., building standards, zoning, protected areas, fishing quotas, water agreements, property/land tenure, DRR laws.
+# - research development: knowledge, modeling, surveillance, planning, R&D, networks.
+#   e.g., climate modeling/predictions & simulations, diagnostics & surveillance (pests/disease), policy analysis, strategic planning, collaboration & networks, technology/biotech/digital agriculture R&D, socioeconomic research.
+# 
+# 
+# - behavioural: household/community behaviors & practices.
+#   e.g., dietary change, reduce energy/food waste, shutters/sandbags, storing water, political action/advocacy, purchasing insurance(as a private action),shifts in practice, promoting new practices, evacuation/migration/retreat.
+# - educational: awareness, training, extension, inclusion, learning platforms.
+#   e.g., extension (public/private), participatory action research, research networks, workshops, gender & social inclusion (engage marginalized groups, women’s leadership, equitable resource allocation).
+# - informational: climate/market/health info & early warning.
+#   e.g., daily/10-day/dekadal/seasonal forecasts (precipitation/temperature/wind/soil moisture/soil temperature),
+#        EWS for cyclones/drought/flood/landslide, hazard & vulnerability mapping, market information, pathogen/pest tracking.
+# - economic: livelihoods & income diversification at household/community level.
+# 
+# 
+# - engineered and built environment: hard/engineered structures & utilities.
+#   e.g., seawalls, dikes, breakwaters, jetties, groynes, flood barriers, storm surge gates, cliff stabilization, dams, retention basins, improved drainage, transport/road infrastructure, sewage works, water & pump storage.
+# - services: large-scale service delivery platforms (social protection, public health, labor).
+#   e.g., cash transfers, food aid/banks/malnutrition treatment, vaccination programs, emergency medical services, water safety plans, public works, training & ALMPs, protective equipment guidance.
+# - supply-chain improvement: logistics, storage, markets, distribution.
+#   e.g., grain/fodder banks, cold storage/warehouses, food transport/distribution, reduced food loss, packaging reduction, market access/interregional trading, urban/peri-urban agriculture supply-chain upgrades.
+# - technological: precision ag, sensing, automation, genetics, renewables.
+#   e.g., IoT/GNSS/GPS/GIS, remote sensing (drone/aircraft/satellite), VRT/SSNM, automated/robotic systems (milking/feeding/harvesting), phenotyping, improved breeds/varieties, genome editing/sequencing, bioenergy/hydropower/geothermal/photovoltaics.
+# 
+# 
+# Decision rules:
+# - Pick the intervention_type that best captures the **central** intervention described.
+# - If multiple types appear, choose the dominant one (by intent/means). If still unclear, return 'NA'.
+# 
+# INPUTS (numbered):
+# {paste0(sprintf('%d) %s', seq_along(txts), txts), collapse = '\n')}"
 #   )
 # }
 # 
-# # ---- Single-call classifier (ONE label) ----
-# classify_action_type <- function(txt, model = ACT_TYPE_MODEL) {
-#   if (is.na(txt) || !nzchar(txt)) return(NA_character_)
-#   ans <- tryCatch(
-#     ellmer::chat_openai(model = model)$chat(make_action_type_prompt(txt)),
-#     error = function(e) e
-#   )
-#   if (inherits(ans, "error")) {
-#     warning("GPT call failed: ", conditionMessage(ans))
-#     return(NA_character_)
+# # ------------- Batch Classifier -------------
+# classify_intervention_type_batch <- function(txts, model = INTERVENTION_TYPE_MODEL, chunk_size = 50) {
+#   if (!length(txts)) return(character(0))
+#   chat <- ellmer::chat_openai(model = model)
+#   out  <- vector("character", length(txts))
+# 
+#   # Split into chunks of indices
+#   idx <- seq_along(txts)
+#   chunks <- split(idx, ceiling(idx / chunk_size))
+# 
+#   pb <- txtProgressBar(min = 0, max = length(chunks), style = 3)
+#   on.exit(close(pb), add = TRUE)
+# 
+#   for (i in seq_along(chunks)) {
+#     ids <- chunks[[i]]
+#     prompt <- make_intervention_type_batch_prompt(txts[ids])
+# 
+#     ans <- tryCatch(chat$chat(prompt), error = function(e) e)
+#     if (inherits(ans, "error")) {
+#       warning("GPT batch failed: ", conditionMessage(ans), " — assigning NA for this chunk.")
+#       out[ids] <- NA_character_
+#       setTxtProgressBar(pb, i); next
+#     }
+# 
+#     # Expect one label per line; trim; strip accidental numbering if present
+#     lines <- strsplit(ans, "\\r?\\n", perl = TRUE)[[1]]
+#     lines <- trimws(lines)
+#     lines <- lines[nzchar(lines)]
+#     lines <- sub("^[0-9]+[.)\\-:]\\s*", "", lines, perl = TRUE)
+# 
+#     # Align length with inputs
+#     if (length(lines) < length(ids)) lines <- c(lines, rep(NA_character_, length(ids) - length(lines)))
+#     if (length(lines) > length(ids)) lines <- lines[seq_along(ids)]
+# 
+#     # Canonicalize to your exact labels
+#     out[ids] <- vapply(lines, canonicalize_intervention_type, character(1))
+#     setTxtProgressBar(pb, i)
 #   }
-#   raw <- trimws(ans)
-#   if (!nzchar(raw) || toupper(raw) == "NA") return(NA_character_)
-#   # Canonicalize to allowed label (case-insensitive)
-#   hit <- ACTION_TYPE_LABELS[tolower(ACTION_TYPE_LABELS) == tolower(raw)]
-#   if (!length(hit)) return(NA_character_)
-#   hit
+# 
+#   out
 # }
 # 
-# # ---- Run on Action rows ----
-# if (!"ActionType_GPT" %in% names(adaptdata)) adaptdata$ActionType_GPT <- NA_character_
+# # ------------- Run on Action rows (BATCH) -------------
+# if (!"InterventionType_GPT" %in% names(adaptdata)) adaptdata$InterventionType_GPT <- NA_character_
 # 
 # act_idx <- which(grepl("^\\s*action\\s*$", adaptdata$Element, ignore.case = TRUE))
 # if (length(act_idx)) {
-#   cat("Classifying Action Type for", length(act_idx), "rows...\n")
-#   pb <- txtProgressBar(min = 0, max = length(act_idx), style = 3)
-#   for (i in seq_along(act_idx)) {
-#     r <- act_idx[i]
-#     adaptdata$ActionType_GPT[r] <- classify_action_type(adaptdata$ElementText[r])
-#     setTxtProgressBar(pb, i)
-#   }
-#   close(pb)
+#   cat("Classifying intervention_type for", length(act_idx), "rows in batches...\n")
+#   adaptdata$InterventionType_GPT[act_idx] <-
+#     classify_intervention_type_batch(adaptdata$ElementText[act_idx],
+#                                      model = INTERVENTION_TYPE_MODEL,
+#                                      chunk_size = 50)
 # } else {
 #   cat("No rows with Element == 'Action' found.\n")
 # }
 # 
-# # ---- Preview ----
+# # ------------- Preview -------------
 # preview_type <- adaptdata %>%
 #   filter(grepl("^\\s*action\\s*$", Element, ignore.case = TRUE)) %>%
 #   transmute(
 #     Country, Document,
 #     ElementText = ifelse(is.na(ElementText), "",
-#                          ifelse(nchar(ElementText) > 120,
-#                                 paste0("<span title='", ElementText, "'>", substr(ElementText, 1, 120), "...</span>"),
+#                          ifelse(nchar(ElementText) > 140,
+#                                 paste0("<span title='", ElementText, "'>", substr(ElementText, 1, 140), "...</span>"),
 #                                 ElementText)),
-#     ActionType_GPT
+#     InterventionType_GPT
 #   )
 # 
 # DT::datatable(
 #   preview_type, escape = FALSE,
-#   caption = "🏷️ Action type — GPT",
+#   caption = "🏷️ Intervention_type — GPT",
 #   options = list(pageLength = 10, autoWidth = TRUE, dom = "tip")
 # )
-# 
-# # Optional export
-# write.csv(preview_type, "action_type_gpt_preview.csv", row.names = FALSE)
-# write.csv(adaptdata,"adaptdata_action_type.csv")
 
 ```
 
+
 ```{r,echo=FALSE}
+adaptdata<-read.csv("adaptadata_action_type_nano6.csv")
 
-# --- Action Level & Type summaries (counts + DT + plots) --------------------
-suppressPackageStartupMessages({
-  library(dplyr); library(stringr); library(tidyr)
-  library(DT); library(ggplot2); library(readr)
-})
+# ---- Fix: set missing InterventionType_GPT to "economic" if Element == "Action" ----
+adaptdata$InterventionType_GPT <- ifelse(
+  is.na(adaptdata$InterventionType_GPT) & 
+    grepl("^\\s*action\\s*$", adaptdata$Element, ignore.case = TRUE),
+  "economic",
+  adaptdata$InterventionType_GPT
+)
 
-# If the current environment doesn't have both columns, try reloading the latest CSV
-if (!exists("adaptdata") || !all(c("ActionLevel_GPT","ActionType_GPT") %in% names(adaptdata))) {
-  if (file.exists("adaptdata_action_type.csv")) {
-    adaptdata <- readr::read_csv("adaptdata_action_type.csv", show_col_types = FALSE)
-  } else if (file.exists("adaptdata_action_level.csv")) {
-    adaptdata <- readr::read_csv("adaptdata_action_level.csv", show_col_types = FALSE)
-  } else {
-    stop("adaptdata with ActionLevel_GPT / ActionType_GPT not found. Run steps 5.1–5.2 first.")
+
+
+# ---- Quick check --
+
+# ---- Canonical Action Type Mapping ----
+intervention_to_action_type <- function(x) {
+  raw <- tolower(trimws(x))
+
+  if (raw %in% c("biodiversity development",
+                 "ecological restoration",
+                 "green infrastructure",
+                 "agroforestry",
+                 "animals",
+                 "crop diversification",
+                 "energy",
+                 "migration",
+                 "nutrient management",
+                 "pest and disease management",
+                 "postharvest",
+                 "schedule modification",
+                 "soil management",
+                 "water management")) {
+    return("ecosystem based")
   }
+
+  if (raw %in% c("economic",
+                 "government policies and programs",
+                 "laws and regulations",
+                 "research development")) {
+    return("institutional")
+  }
+
+  if (raw %in% c("behavioural",
+                 "educational",
+                 "informational",
+                 "social",
+                 "livelihood diversification")) {
+    return("social")
+  }
+
+  if (raw %in% c("engineered and built environment",
+                 "services",
+                 "supply-chain improvement",
+                 "technological",
+                 "renewable energy")) {
+    return("infrastructure/structural / physical")
+  }
+
+  if (raw %in% c("uncategorized")) {
+    return("uncategorized")
+  }
+
+  return(NA_character_)
 }
 
-# Helper to normalize unicode spaces and trim tokens
+# ---- Apply to your classified data ----
+if (!"ActionType_GPT" %in% names(adaptdata)) {
+  adaptdata$ActionType_GPT <- NA_character_
+}
+
+adaptdata$ActionType_GPT <- vapply(adaptdata$InterventionType_GPT,
+                                   intervention_to_action_type,
+                                   character(1))
+
+```
+
+
+```{r,echo=FALSE}
 .norm_tok <- function(x) {
   x %>% str_replace_all("\\p{Zs}+", " ") %>% str_squish()
 }
-
-# -----------------------
-# A) ACTION LEVEL SUMMARY
-# -----------------------
-level_counts <- adaptdata %>%
+# B) ACTION TYPE SUMMARY
+# ----------------------
+type_counts <- adaptdata %>%
   filter(grepl("^\\s*action\\s*$", Element, ignore.case = TRUE),
-         !is.na(ActionLevel_GPT),
-         str_detect(ActionLevel_GPT, "\\S")) %>%
-  separate_rows(ActionLevel_GPT, sep = ";") %>%
-  mutate(ActionLevel_GPT = .norm_tok(ActionLevel_GPT)) %>%
-  filter(ActionLevel_GPT != "") %>%
-  count(ActionLevel_GPT, sort = TRUE) %>%
-  rename(`Action Level` = ActionLevel_GPT,
+         !is.na(InterventionType_GPT),
+         str_detect(InterventionType_GPT, "\\S")) %>%
+  separate_rows(InterventionType_GPT, sep = ";") %>%        # robust if multiple
+  mutate(InterventionType_GPT = .norm_tok(InterventionType_GPT)) %>%
+  filter(InterventionType_GPT != "") %>%
+  count(InterventionType_GPT, sort = TRUE) %>%
+  rename(`Action Type` = InterventionType_GPT,
          Occurrences = n)
 
 DT::datatable(
-  level_counts,
+  type_counts,
   rownames = FALSE,
   options = list(pageLength = 10, autoWidth = TRUE, dom = 'tip'),
-  caption = "🧭 Action Level (Groundwork vs Substantive) — counts"
+  caption = "🏷️ Action Type — counts"
 )
 
-level_props <- level_counts %>%
-  mutate(Percent = Occurrences / sum(Occurrences),
-         midlab  = cumsum(Percent) - Percent/2,
-         label   = paste0(round(Percent*100), "%"))
+write.csv(type_counts, "action_type_counts.csv", row.names = FALSE)
 
-donut <- ggplot(level_props, aes(x = 2, y = Occurrences, fill = `Action Level`)) +
-  geom_col(width = 1, color = NA) +
-  # inner white circle to make the "hole"
-  geom_col(data = data.frame(Occurrences = sum(level_props$Occurrences)),
-           aes(x = 1, y = Occurrences),
-           inherit.aes = FALSE, fill = "white", width = 1) +
-  coord_polar(theta = "y") +
-  xlim(0.5, 2.5) +
-  scale_fill_viridis_d(option = "viridis") +
-  labs(title = "Action level — composition") +
-  theme_void(base_size = 12) +
-  theme(legend.title = element_blank())
+type_plot <- ggplot(type_counts,
+  aes(x = reorder(`Action Type`, Occurrences),
+      y = Occurrences,
+      fill = `Action Type`)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  scale_fill_viridis_d(option = "mako") +
+  labs(title = "Action Type by count", x = NULL, y = "Occurrences") +
+  theme_minimal(base_size = 12) +
+  theme(axis.text.y = element_text(size = 14),
+        axis.text.x = element_text(size = 14))
 
-donut
+type_plot
+
+```
 
 
-
-# ----------------------
-# B) ACTION TYPE SUMMARY
-# ----------------------
+```{r}
 type_counts <- adaptdata %>%
   filter(grepl("^\\s*action\\s*$", Element, ignore.case = TRUE),
          !is.na(ActionType_GPT),
@@ -2036,6 +2192,169 @@ type_plot <- ggplot(type_counts,
 
 type_plot
 
+
+```
+## Action type data 
+```{r,echo=FALSE}
+
+set.seed(123)
+
+action_sampled <- adaptdata %>%
+  filter(grepl("^\\s*action\\s*$", Element, ignore.case = TRUE),
+         !is.na(ActionType_GPT), str_detect(ActionType_GPT, "\\S")) %>%
+  group_by(ActionType_GPT) %>%
+  slice_sample(prop = 1) %>%   # shuffle each group
+  slice_head(n = 10) %>%       # then keep up to 10 per group
+  ungroup() %>%
+  transmute(
+    `Action Type` = ActionType_GPT,
+    Country, Document,
+    ElementText = make_preview_html(ElementText),
+    InterventionType_GPT
+  )
+
+DT::datatable(
+  action_sampled,
+  escape = FALSE,
+  caption = "🎯 Action type — random 10 per type (spot-check)",
+  options = list(pageLength = 10, autoWidth = TRUE, dom = "tip")
+)
+
+
+```
+
+## 5.2 Action level
+
+Action Level classification
+
+**Goal.** Distinguish whether each *Action* reported is **preparatory groundwork** or a **substantive adaptation measure**.
+
+**Definitions**
+
+- **Groundwork** — upstream or enabling work such as:
+  - impact/vulnerability assessments, scenarios, conceptual tools  
+  - policy recommendations, planning frameworks  
+- **Substantive action** — concrete measures such as:
+  - organizational development, regulations, awareness/outreach, education/training  
+  - monitoring/MEL, infrastructure, technology/innovation  
+  - financial mechanisms, resource transfer, funding  
+
+**Method**
+
+- GPT reads each *Action* text and must return **exactly one label**: *Groundwork* or *Substantive action*.  
+- If no clear match, the model returns `NA`.  
+- The result is stored in `ActionLevel_GPT` and previewed in a datatable.  
+
+
+
+
+```{r,echo=FALSE}
+
+adaptdata<-read.csv("adaptdata_action_level_nano6.csv")
+
+
+
+# --- Action Level & Type summaries (counts + DT + plots) --------------------
+suppressPackageStartupMessages({
+  library(dplyr); library(stringr); library(tidyr)
+  library(DT); library(ggplot2); library(readr)
+})
+
+# If the current environment doesn't have both columns, try reloading the latest CSV
+if (!exists("adaptdata") || !all(c("ActionLevel_GPT","ActionType_GPT") %in% names(adaptdata))) {
+  if (file.exists("adaptdata_action_type.csv")) {
+    adaptdata <- readr::read_csv("adaptdata_action_type.csv", show_col_types = FALSE)
+  } else if (file.exists("adaptdata_action_level.csv")) {
+    adaptdata <- readr::read_csv("adaptdata_action_level.csv", show_col_types = FALSE)
+  } else {
+    stop("adaptdata with ActionLevel_GPT / ActionType_GPT not found. Run steps 5.1–5.2 first.")
+  }
+}
+
+# Helper to normalize unicode spaces and trim tokens
+
+
+# -----------------------
+# A) ACTION LEVEL SUMMARY
+# -----------------------
+level_counts <- adaptdata %>%
+  filter(grepl("^\\s*action\\s*$", Element, ignore.case = TRUE),
+         !is.na(ActionLevel_GPT),
+         str_detect(ActionLevel_GPT, "\\S")) %>%
+  count(ActionLevel_GPT, sort = TRUE) %>%
+  rename(`Action Level` = ActionLevel_GPT,
+         Occurrences = n)
+
+
+DT::datatable(
+  level_counts,
+  rownames = FALSE,
+  options = list(pageLength = 10, autoWidth = TRUE, dom = 'tip'),
+  caption = "🧭 Action Level (Groundwork vs Substantive) — counts"
+)
+
+
+level_props <- level_counts %>%
+  mutate(
+    Percent = Occurrences / sum(Occurrences),
+    midlab  = cumsum(Percent) - Percent/2,
+    label   = paste0(round(Percent*100), "%")
+  )
+
+# ---- Donut chart ----
+donut <- ggplot(level_props, aes(x = 2, y = Occurrences, fill = `Action Level`)) +
+  geom_col(width = 1, color = NA) +
+  # inner white circle to make the "hole"
+  geom_col(data = data.frame(Occurrences = sum(level_props$Occurrences)),
+           aes(x = 1, y = Occurrences),
+           inherit.aes = FALSE, fill = "white", width = 1) +
+  geom_text(aes(x = 2, y = cumsum(Occurrences) - Occurrences/2,
+                label = label), color = "white", size = 5) +
+  coord_polar(theta = "y") +
+  xlim(0.5, 2.5) +
+  scale_fill_viridis_d(option = "viridis") +
+  labs(title = "Action level — composition") +
+  theme_void(base_size = 12) +
+  theme(legend.title = element_blank())
+
+donut
+
+
+```
+
+```{r,echo=FALSE}
+#---- Preview: Action level (only relevant columns) ----
+suppressPackageStartupMessages({
+  library(dplyr); library(stringr); library(DT)
+})
+
+
+make_preview_html <- function(txt, n = 140) {
+  ifelse(
+    is.na(txt) | !nzchar(txt), "",
+    ifelse(
+      nchar(txt) > n,
+      paste0("<span title='", txt, "'>", substr(txt, 1, n), "...</span>"),
+      txt
+    )
+  )
+}
+
+action_level_preview <- adaptdata %>%
+  filter(grepl("^\\s*action\\s*$", Element, ignore.case = TRUE)) %>%
+  transmute(
+    Country, Document,
+    ElementText = make_preview_html(ElementText),
+    ActionLevel_GPT
+  )
+
+DT::datatable(
+  action_level_preview,
+  escape = FALSE,
+  caption = "🧭 Action level — relevant columns (preview)",
+  options = list(pageLength = 10, autoWidth = TRUE, dom = "tip")
+)
+
 ```
 
 # Step 6 : Results
@@ -2053,11 +2372,11 @@ type_plot
 - We **store the model’s reply verbatim** in `ResultType_GPT` (no normalization here); any cleanup or remapping happens later.
 
 
-```{r,echo=FALSE}
+```{r,echo=FALSE,}
 
-adaptdata <- read_csv("adaptdata_action_type.csv")
-# ========================= Step X: Result Type (GPT) =========================
-# Goal now: store EXACT GPT output in ResultType_GPT (no normalization/cleanup)
+#adaptdata <- read_csv("adaptdata_action_type.csv")
+# #========================= Step X: Result Type (GPT) =========================
+# #Goal now: store EXACT GPT output in ResultType_GPT (no normalization/cleanup)
 # 
 # suppressPackageStartupMessages({
 #   library(dplyr)
@@ -2076,26 +2395,45 @@ adaptdata <- read_csv("adaptdata_action_type.csv")
 # RESULT_MODEL <- "gpt-5-nano"
 # 
 # # ---- Prompt builder (unchanged, but we will store raw model output) ----
+# # Updated, precise prompt for Result Type (single-label)
 # make_result_prompt <- function(txt) {
 #   glue::glue(
-# "Classify the passage by the *type of results* it reports. You may choose one or more.
+# "Classify the passage by the *type of results* it reports. Choose EXACTLY ONE label.
 # 
-# Allowed labels (choose from these EXACT words only):
-# - Input — resources needed to implement an action (money,funding, staff, tools, data, analyses, maps).
-# - Process — policies/steps/governance to plan or implement (plans, strategies, frameworks, integration into policies).
-# - Output — immediate products/services delivered (things built, distributed, trained people, area covered).
-# - Outcome — changes in condition or performance (improved yields, efficiency, resilience, recovery, wellbeing).
+# Allowed labels (use these exact words only):
+# - Input — resources needed to implement an adaptation action (e.g., finance amounts; staff counts; tools/data/analyses/maps prepared).
+# - Process — progress in designing/implementing adaptation policy processes (e.g., integrating climate action into policies/strategies; steps to formulate, implement, publish, and update programmes, strategies, measures, frameworks).
+# - Output — immediate products/services delivered, not changes in baseline (e.g., trees planted; improved cookstoves installed; seed varieties disseminated; area covered; # beneficiaries/adopters; people trained). “Area reforested” is an Output if it is the direct result of a reforestation activity.
+# - Outcome — intermediate effects including behavior change and condition/uptake changes (e.g., improved knowledge; increased adoption rates of adaptive technologies/practices; migration/relocation uptake; coverage/uptake indicators when they reflect change in condition).
+# - Impact — ultimate effects relative to climate risks showing adequacy/effectiveness of measures (e.g., agricultural productivity improvements; water use efficiency; livelihoods/wellbeing; food security; recovery after extreme events).
 # 
-# Rules:
-# - Think silently; DO NOT write your reasoning.
-# - if more than one category could fit choose the most relevant one for the description.
-# - Return ONLY the label you choose.
-# - No extra words or punctuation. If none fit, return 'NA'.
+# Disambiguation (apply in order):
+# 1) If multiple levels are present, choose the HIGHEST level mentioned: Impact > Outcome > Output > Process > Input.
+# 2) Coverage/uptake:
+#    - If it’s a delivered count/area (# trained, area covered, items distributed) → Output.
+#    - If it’s a change in condition/behavior (knowledge improved, adoption rate increased, migration occurred) → Outcome.
+# 3) Resources vs steps vs products:
+#    - Resources allocated/prepared → Input.
+#    - Policies/strategies/frameworks/steps/plan adoption → Process.
+#    - Tangible products/services delivered → Output.
+# 4) If none fit, return 'NA'.
+# 
+# Examples:
+# - “USD 2M allocated; hazard maps produced” → Input
+# - “NAP approved; climate action integrated into sector plans” → Process
+# - “10,000 stoves installed; 2,000 ha reforested; 500 farmers trained” → Output
+# - “Adoption of drought-tolerant seeds rose from 15% to 40%; participants’ knowledge improved” → Outcome
+# - “Maize yields +12%; household food security improved; farmers recovered after floods” → Impact
+# 
+# Output format:
+# - Return ONLY one of: Input | Process | Output | Outcome | Impact | NA
+# - No extra words or punctuation.
 # 
 # TEXT:
 # \"\"\"{txt}\"\"\""
 #   )
 # }
+# 
 # 
 # # ---- Raw classifier: returns EXACT text from GPT (no trimming/canonization) ----
 # classify_result_types_raw <- function(txt, model = RESULT_MODEL) {
@@ -2152,106 +2490,107 @@ adaptdata <- read_csv("adaptdata_action_type.csv")
 #   )
 # 
 # 
-# 
+
 # # Save side-by-side comparison for QA
 # write.csv(result_preview, "result_type_gpt_preview.csv", row.names = FALSE)
 # write.csv(result_preview, "adaptdata_results.csv", row.names = FALSE)
 # 
 
+
 ```
 
 
 
-```{r,echo=FALSE}
+```{r,echo=FALSE,}
 # --- Make "results" = Action Type + (ResultType_GPT) + CI replacements -----------
-suppressPackageStartupMessages({
-  library(dplyr); library(readr); library(stringr); library(tidyr)
-})
-
-# Inputs (your filenames)
-path_ci        <- "adaptdata_climateimpact5nano_manualcheck.csv"   # has RowID, ImpactCategories, ClimateImpact_Keywords (authoritative)
-path_actionlvl <- "adaptdata_action_level.csv"
-path_actiontyp <- "adaptdata_action_type.csv"
-path_results   <- "adaptdata_results.csv"              # has ResultType_GPT (and maybe ResultType_Manual)
-
-# Outputs
-out_actionlvl  <- "action_level_replaced_impact_ci.csv"
-out_actiontyp  <- "action_type_replaced_impact_ci.csv"
-out_resultlike <- "action_type_PLUS_results_replaced_impact_ci.csv"  # <-- your “result one”
-
-# ---------- helpers ----------
-normalize_element_text <- function(x) {
-  x <- as.character(x)
-  # pull full text from <span title='...'> if present
-  title_val <- stringr::str_match(x, "title=['\"](.*?)['\"]")[,2]
-  out <- ifelse(!is.na(title_val), title_val, x)
-  out <- gsub("<[^>]+>", " ", out)   # strip tags
-  out <- gsub("\\s+", " ", out)      # squeeze whitespace
-  trimws(out)
-}
-drop_cols <- function(df, cols) {
-  cols <- intersect(cols, names(df))
-  if (length(cols)) dplyr::select(df, -all_of(cols)) else df
-}
-
-# ---------- load ----------
-ci        <- readr::read_csv(path_ci,        show_col_types = FALSE)
-actionlvl <- readr::read_csv(path_actionlvl, show_col_types = FALSE)
-actiontyp <- readr::read_csv(path_actiontyp, show_col_types = FALSE)
-results   <- readr::read_csv(path_results,   show_col_types = FALSE)
-
-# sanity
-need_ci <- c("RowID","ImpactCategories","ClimateImpact_Keywords")
-stopifnot(all(need_ci %in% names(ci)))
-stopifnot("RowID" %in% names(actionlvl))
-stopifnot("RowID" %in% names(actiontyp))
-stopifnot(all(c("Country","Document","ElementText") %in% names(results)))
-
-# ---------- authoritative CI map (by RowID) ----------
-map_ci <- ci %>%
-  mutate(RowID = as.integer(RowID)) %>%
-  group_by(RowID) %>%
-  summarise(
-    ImpactCategories       = dplyr::first(na.omit(ImpactCategories)),
-    ClimateImpact_Keywords = dplyr::first(na.omit(ClimateImpact_Keywords)),
-    .groups = "drop"
-  )
-
-# ---------- 1) Replace/add CI in Action Level & Action Type ----------
-actionlvl_out <- actionlvl %>%
-  mutate(RowID = as.integer(RowID)) %>%
-  drop_cols(c("ImpactCategories","ClimateImpact_Keywords")) %>%
-  left_join(map_ci, by = "RowID")
-
-actiontyp_out <- actiontyp %>%
-  mutate(RowID = as.integer(RowID)) %>%
-  drop_cols(c("ImpactCategories","ClimateImpact_Keywords")) %>%
-  left_join(map_ci, by = "RowID")
-
-
-# ---------- 2) Build “results-like” dataset = Action Type + ResultType_GPT ----------
-# Normalize and dedupe results to a key so we can join by text
-res_key <- results %>%
-  mutate(ElementText_norm = normalize_element_text(ElementText)) %>%
-  group_by(Country, Document, ElementText_norm) %>%
-  summarise(
-    ResultType_GPT    = dplyr::first(na.omit(ResultType_GPT)),
-    ResultType_Manual = dplyr::first(na.omit(ResultType_Manual)),
-    .groups = "drop"
-  )
-
-# Join onto the Action Type file (keep all Action Type rows)
-actiontyp_plus_results <- actiontyp_out %>%
-  mutate(ElementText_norm = normalize_element_text(ElementText)) %>%
-  left_join(res_key, by = c("Country","Document","ElementText_norm")) %>%
-  select(-ElementText_norm)
-
-
-actiontyp_plus_results<-actiontyp_plus_results%>%
-  select(-c("...1","...2","...3","...4","ResultType","ResultType_Manual"))
-
-readr::write_csv(actiontyp_plus_results, "adaptdatafinal.csv")
-
+# suppressPackageStartupMessages({
+#   library(dplyr); library(readr); library(stringr); library(tidyr)
+# })
+# 
+# # Inputs (your filenames)
+# path_ci        <- "adaptdata_climateimpact5nano_manualcheck.csv"   # has RowID, ImpactCategories, ClimateImpact_Keywords (authoritative)
+# path_actionlvl <- "adaptdata_action_level.csv"
+# path_actiontyp <- "adaptdata_action_type.csv"
+# path_results   <- "adaptdata_results.csv"              # has ResultType_GPT (and maybe ResultType_Manual)
+# 
+# # Outputs
+# out_actionlvl  <- "action_level_replaced_impact_ci.csv"
+# out_actiontyp  <- "action_type_replaced_impact_ci.csv"
+# out_resultlike <- "action_type_PLUS_results_replaced_impact_ci.csv"  # <-- your “result one”
+# 
+# # ---------- helpers ----------
+# normalize_element_text <- function(x) {
+#   x <- as.character(x)
+#   # pull full text from <span title='...'> if present
+#   title_val <- stringr::str_match(x, "title=['\"](.*?)['\"]")[,2]
+#   out <- ifelse(!is.na(title_val), title_val, x)
+#   out <- gsub("<[^>]+>", " ", out)   # strip tags
+#   out <- gsub("\\s+", " ", out)      # squeeze whitespace
+#   trimws(out)
+# }
+# drop_cols <- function(df, cols) {
+#   cols <- intersect(cols, names(df))
+#   if (length(cols)) dplyr::select(df, -all_of(cols)) else df
+# }
+# 
+# # ---------- load ----------
+# ci        <- readr::read_csv(path_ci,        show_col_types = FALSE)
+# actionlvl <- readr::read_csv(path_actionlvl, show_col_types = FALSE)
+# actiontyp <- readr::read_csv(path_actiontyp, show_col_types = FALSE)
+# results   <- readr::read_csv(path_results,   show_col_types = FALSE)
+# 
+# # sanity
+# need_ci <- c("RowID","ImpactCategories","ClimateImpact_Keywords")
+# stopifnot(all(need_ci %in% names(ci)))
+# stopifnot("RowID" %in% names(actionlvl))
+# stopifnot("RowID" %in% names(actiontyp))
+# stopifnot(all(c("Country","Document","ElementText") %in% names(results)))
+# 
+# # ---------- authoritative CI map (by RowID) ----------
+# map_ci <- ci %>%
+#   mutate(RowID = as.integer(RowID)) %>%
+#   group_by(RowID) %>%
+#   summarise(
+#     ImpactCategories       = dplyr::first(na.omit(ImpactCategories)),
+#     ClimateImpact_Keywords = dplyr::first(na.omit(ClimateImpact_Keywords)),
+#     .groups = "drop"
+#   )
+# 
+# # ---------- 1) Replace/add CI in Action Level & Action Type ----------
+# actionlvl_out <- actionlvl %>%
+#   mutate(RowID = as.integer(RowID)) %>%
+#   drop_cols(c("ImpactCategories","ClimateImpact_Keywords")) %>%
+#   left_join(map_ci, by = "RowID")
+# 
+# actiontyp_out <- actiontyp %>%
+#   mutate(RowID = as.integer(RowID)) %>%
+#   drop_cols(c("ImpactCategories","ClimateImpact_Keywords")) %>%
+#   left_join(map_ci, by = "RowID")
+# 
+# 
+# # ---------- 2) Build “results-like” dataset = Action Type + ResultType_GPT ----------
+# # Normalize and dedupe results to a key so we can join by text
+# res_key <- results %>%
+#   mutate(ElementText_norm = normalize_element_text(ElementText)) %>%
+#   group_by(Country, Document, ElementText_norm) %>%
+#   summarise(
+#     ResultType_GPT    = dplyr::first(na.omit(ResultType_GPT)),
+#     ResultType_Manual = dplyr::first(na.omit(ResultType_Manual)),
+#     .groups = "drop"
+#   )
+# 
+# # Join onto the Action Type file (keep all Action Type rows)
+# actiontyp_plus_results <- actiontyp_out %>%
+#   mutate(ElementText_norm = normalize_element_text(ElementText)) %>%
+#   left_join(res_key, by = c("Country","Document","ElementText_norm")) %>%
+#   select(-ElementText_norm)
+# 
+# 
+# actiontyp_plus_results<-actiontyp_plus_results%>%
+#   select(-c("...1","...2","...3","...4","ResultType","ResultType_Manual"))
+# 
+# readr::write_csv(actiontyp_plus_results, "adaptdatafinal.csv")
+# 
 
 
 
@@ -2259,121 +2598,437 @@ readr::write_csv(actiontyp_plus_results, "adaptdatafinal.csv")
 ```
 
 
+```{r,echo=FALSE,}
+# # --- Results: simple bar chart (Input / Process / Output / Outcome) ---
+# 
+# RESULT_LABELS <- c("Input","Process","Output","Outcome")
+# 
+# 
+# result_counts <- actiontyp_plus_results %>%
+#   filter(Element == "Result",
+#          !is.na(ResultType_GPT),
+#          nzchar(ResultType_GPT)) %>%
+#   mutate(ResultType_GPT = str_squish(ResultType_GPT)) %>%
+#   # map to canonical labels & drop anything off-list (just in case)
+#   mutate(ResultType_GPT = sapply(ResultType_GPT, function(t) {
+#     hit <- RESULT_LABELS[tolower(RESULT_LABELS) == tolower(t)]
+#     ifelse(length(hit), hit, NA_character_)
+#   })) %>%
+#   filter(!is.na(ResultType_GPT)) %>%
+#   mutate(ResultType_GPT = factor(ResultType_GPT, levels = RESULT_LABELS)) %>%
+#   count(ResultType_GPT, name = "Occurrences") %>%
+#   arrange(ResultType_GPT) %>%
+#   mutate(Share = Occurrences / sum(Occurrences),
+#          Label = paste0(Occurrences, " (", round(Share*100), "%)"))
+# 
+# 
+# # horizontal bars with counts + %
+# p_results <- ggplot(result_counts,
+#   aes(x = ResultType_GPT, y = Occurrences, fill = ResultType_GPT)) +
+#   geom_col(width = 0.7, show.legend = FALSE) +
+#   geom_text(aes(label = Label), hjust = -0.15, size = 4) +
+#   coord_flip(ylim = c(0, max(result_counts$Occurrences)*1.15)) +
+#   scale_fill_brewer(palette = "Set2") +  # swap palette if you like
+#   labs(title = "Result types by count",
+#        x = NULL, y = "Occurrences") +
+#   theme_minimal(base_size = 12) +
+#   theme(axis.text.y = element_text(size = 13),
+#         axis.text.x = element_text(size = 12))
+# 
+# p_results
+```
+
+# Step 7 : Adaptation priorities
+
 ```{r,echo=FALSE}
-# --- Results: simple bar chart (Input / Process / Output / Outcome) ---
+# 
+# suppressPackageStartupMessages({
+#   library(dplyr); library(stringr); library(purrr); library(tibble); library(readr); library(rlang)
+# })
+# 
+# # -----------------------------
+# # Helper functions (same style as your impact classifier)
+# # -----------------------------
+# escape_regex <- function(x) str_replace_all(x, "([\\.^$|?*+()\\[\\]{}])", "\\\\\\1")
+# hyphen_flexible <- function(x) str_replace_all(x, "\\s*[–-]\\s*", "\\\\s*[–-]\\\\s*")
+# 
+# token_to_pattern <- function(token) {
+#   token <- str_squish(token)
+#   if (token == "") return("")
+#   alts <- str_split(token, "/", simplify = TRUE) %>% as.character()
+#   alts <- escape_regex(alts) %>% hyphen_flexible()
+#   if (length(alts) == 1) alts else paste0("(?:", paste(alts, collapse="|"), ")")
+# }
+# 
+# phrase_to_regex <- function(phrase) {
+#   tokens <- str_split(str_squish(phrase), "\\s+", simplify = TRUE) %>% as.character()
+#   if (!length(tokens)) return("")
+#   pats <- map_chr(tokens, token_to_pattern)
+#   paste0("\\\\b", paste(pats, collapse="\\\\s+"), "\\\\b")
+# }
+# 
+# keywords_to_regex <- function(keywords) {
+#   phrases <- str_split(keywords, ";", simplify = TRUE) %>% as.character() %>% str_trim()
+#   phrases <- phrases[nzchar(phrases)]
+#   if (!length(phrases)) return("")
+#   paste(map_chr(phrases, phrase_to_regex), collapse="|")
+# }
+# 
+# strip_leading_caseflag <- function(rx) rx %>% str_replace("^\\(\\?i\\)", "") %>% str_squish()
+# 
+# ensure_keywords_covered <- function(tbl) {
+#   tbl %>%
+#     mutate(
+#       .kw_regex = map_chr(Keywords, keywords_to_regex),
+#       .existing = map_chr(Regex, strip_leading_caseflag),
+#       Regex = pmap_chr(list(.existing, .kw_regex), function(exist, kw) {
+#         if (!nzchar(exist) && !nzchar(kw)) return("(?i)")
+#         if (!nzchar(exist)) return(paste0("(?i)(?:", kw, ")"))
+#         if (!nzchar(kw))   return(paste0("(?i)", exist))
+#         paste0("(?i)(?:", exist, "|", kw, ")")
+#       })
+#     ) %>%
+#     select(-.kw_regex, -.existing)
+# }
+# 
+# clean_ap_text <- function(x) x %>% str_replace_all("<[^>]+>", " ") %>% str_squish()
+# 
+# # -----------------------------
+# # Adaptation Priority categories (Keywords + Regex provided)
+# # -----------------------------
+# priority_categories <- tribble(
+#   ~Category, ~Keywords, ~Regex,
+# 
+#   "Water use efficiency & demand management",
+#   "water use efficiency; irrigation efficiency; optimize irrigation; water-saving technologies; leakage reduction; reduce water losses; demand management; non-revenue water; water audits; irrigation modernization; water productivity; metering; smart meters",
+#   "(?i)\\b(irrigation\\s+moderni[sz]ation|water\\s+productivit(?:y|ies)|meter(?:ing|s)|smart\\s+meters?|leak(?:age)?\\s+(?:reduction|control)|reduce\\s+water\\s+loss(?:es)?|non[-\\s]?revenue\\s+water|water\\s+audits?|demand\\s+management|water[-\\s]?saving|irrigation\\s+efficienc(?:y|ies)|water\\s+use\\s+efficienc(?:y|ies)|optimi[sz]e\\s+irrigation|water sector|water management|water resources management|water resources)\\b",
+# 
+#   "Alternative & non-conventional water resources",
+#   "rainwater harvesting; stormwater harvesting; water harvesting; water storage; storage tanks; cisterns; greywater/graywater reuse; recycled water; wastewater reuse; desalination; managed aquifer recharge; artificial recharge; emergency backup water sources; household storage",
+#   "(?i)\\b(rain\\s*water\\s*harvest(?:ing)?|storm\\s*water\\s*harvest(?:ing)?|water\\s+harvest(?:ing)?|water\\s+storage|storage\\s+tanks?|cisterns?|grey\\s*water|gray\\s*water|recycl(?:ed|ing)\\s+water|waste\\s*water\\s+reus(?:e|ing)|desalinat(?:e|ion)|managed\\s+aquifer\\s+recharge|artificial\\s+recharge|backup\\s+water\\s+source(?:s)?|household\\s+storage)\\b",
+# 
+#   "Legal, policy & institutional frameworks",
+#   "legal framework; regulation; legislation; policy; governance; enforcement; institutional capacity; coordination; mainstreaming adaptation; codes; guidelines",
+#   "(?i)\\b(legal\\s+frameworks?|regulations?|legislation|polic(?:y|ies)|governance|enforc(?:e|ement)|institutional\\s+(?:capacity|arrangements?)|coordination|mainstream(?:ing)?\\s+adaptation|planning\\s+codes?|guidelines?)\\b",
+# 
+#   "Climate-smart agriculture (CSA) & resilient farming systems",
+#   "climate-smart agriculture; resilient agriculture systems; diversify crops; agroforestry; conservation agriculture; soil management; sustainable production; productivity and resilience",
+#   "(?i)\\b(climate[-\\s]?smart\\s+agriculture|CSA\\b|resilien\\w+\\s+(?:agriculture|farming|systems?)|diversif(?:y|ication)\\s+of\\s+crops?|agroforestry|conservation\\s+agriculture|soil\\s+management|sustainable\\s+(?:agri\\w*\\s+)?production)\\b",
+# 
+#   "Sustainable land & farm management (incl. organic/landscape approaches)",
+#   "sustainable farming practices; sustainable land management; landscape-based organic farming; integrated agriculture landscape systems; integrated landscape",
+#   "(?i)\\b(sustainable\\s+(?:farming|agricult\\w*|land\\s+management)|SLM\\b|landscape[-\\s]?based\\s+organic\\s+farming|integrated\\s+(?:agricultur(?:e|al)\\s+)?landscape\\s+system(?:s)?|integrated\\s+landscape)\\b",
+# 
+#   "Climate-resilient crops & access to resilient seeds",
+#   "climate-resilient crop varieties; drought/heat/pest tolerant crops; access to resilient seeds; seed systems",
+#   "(?i)\\b(resilien\\w+\\s+(?:crops?|variet(?:y|ies))|toleran\\w+\\s+(?:drought|heat|pests?)|resilien\\w+\\s+seed(?:s)?|seed\\s+system(?:s)?)\\b",
+# 
+#   "Farmer capacity, extension & knowledge services",
+#   "farmers' adaptive capacity; farmer training; extension services; knowledge exchange; capacity building",
+#   "(?i)\\b(farmer(?:s)?'?\\s+(?:training|capacity|skills)|agricultur\\w*\\s+extension|knowledge\\s+exchange|capacity\\s+build(?:ing|s))\\b",
+# 
+#   "Agricultural water management",
+#   "improving water management in agriculture; irrigation; watershed management; on-farm water management; reduce water wastage",
+#   "(?i)\\b(water\\s+management\\s+in\\s+agricultur\\w*|irrigation|watershed\\s+management|on[-\\s]?farm\\s+water\\s+management|reduc(?:e|ing)\\s+water\\s+wastage)\\b",
+# 
+#   "Rural development & livelihood diversification",
+#   "supporting rural development; income diversification; market access; rural infrastructure",
+#   "(?i)\\b(rural\\s+development|income\\s+diversification|market\\s+access|rural\\s+infrastructure)\\b",
+# 
+#   "Ecosystem protection, restoration & protected areas",
+#   "protect and restore ecosystems; biodiversity conservation; habitat restoration; protected areas; nature reserves; ecological redlines; wetlands restoration",
+#   "(?i)\\b(biodiversit\\w+|ecosystem\\s+(?:protection|restoration|services?)|habitat\\s+restoration|protected\\s+areas?|nature\\s+reserves?|ecological\\s+(?:protection\\s+)?redlines?|wetlands?\\s+restoration)\\b",
+# 
+#   "Combat land degradation & desertification",
+#   "land degradation; desertification; soil erosion control; soil fertility; rehabilitate degraded lands; land degradation neutrality",
+#   "(?i)\\b(land\\s+degradation|desertification|soil\\s+erosion\\s*(?:control)?|soil\\s+fertilit(?:y|ies)|degraded\\s+land\\s+(?:rehabilitation|restoration)|land\\s+degradation\\s+neutralit(?:y|ies))\\b",
+# 
+#   "Afforestation, reforestation & carbon sinks",
+#   "afforestation; reforestation; carbon sequestration; increase forest cover; forest stock volume",
+#   "(?i)\\b(afforestation|reforestation|carbon\\s+sequestration|increase\\s+forest\\s+cover|forest\\s+stock\\s+volume)\\b",
+# 
+#   "Invasive species management",
+#   "managing invasive species; controlling invasive species; invasive alien species; IAS",
+#   "(?i)\\b(invasive\\s+(?:alien\\s+)?species|IAS\\b|control\\s+invasive\\s+species|manage\\s+invasive|invasive)\\b",
+# 
+#   "Land-use & spatial planning integration",
+#   "integration into land use planning; spatial plans; zoning; urban planning codes; territorial planning; catchment management plans",
+#   "(?i)\\b(land[-\\s]?use\\s+planning|spatial\\s+(?:plan|plans|planning)|zoning|urban\\s+planning\\s+codes?|territorial\\s+planning|catchment\\s+management\\s+plans?)\\b",
+# 
+#   "Monitoring, data & hydrological observation",
+#   "hydrometeorological observation; systematic observation; climate projections; climate services; hydrological monitoring; monitoring and evaluation; MEL; data access; information systems; analytical base",
+#   "(?i)\\b(hydrometeorolog\\w+|systematic\\s+observation|climate\\s+projection(?:s)?|climate\\s+services?|hydrolog\\w+\\s+monitoring|monitoring\\s+(?:and\\s+)?evaluation|\\bMEL\\b|\\bM&?E\\b|data\\s+(?:access|sharing|system(?:s)?|management)|information\\s+system(?:s)?|analytical\\s+base)\\b",
+# 
+#   "National adaptation frameworks & strategies (incl. NAP/NCCAS & M&E)",
+#   "comprehensive national adaptation framework; NAP; national strategy; strategy 2035; BTR; Table 4.2; implementation periods; goals and objectives; action-oriented; quantification; progress on implementation; framework",
+#   "(?i)\\b(NAP\\b|national\\s+adaptation\\s+strategy|strategy\\s*2035|\\bBTR\\b|Table\\s*4\\.2|implementation\\s+period(?:s)?|goals?\\s+and\\s+objectives?|action[-\\s]?oriented|quantification|progress\\s+on\\s+implementation|framework)\\b",
+# 
+#   "Local adaptation capacity & community empowerment",
+#   "strengthen local adaptation capacities; equip communities; community-based adaptation; local governments; regional organizations; CCCF; CCU; CIDP",
+#   "(?i)\\b(local\\s+adaptation\\s+capacities|equip\\s+communities|community[-\\s]?based\\s+adaptation|local\\s+governments?|regional\\s+organisations?|\\bCCCFs?\\b|\\bCCUs?\\b|\\bCIDPs?|community engagement\\b)\\b",
+# 
+#   "Public awareness, education & engagement",
+#   "public awareness; education campaigns; stakeholder engagement; school programs; curriculum; curricula; educational standards; inform and involve",
+#   "(?i)\\b(public\\s+awareness|education\\s+campaigns?|stakeholder\\s+engagement|school\\s+program(?:s|mes)|curricul(?:um|a)|educational\\s+standards|inform\\s+and\\s+involve)\\b",
+# 
+#   "Institutional & technical capacity building",
+#   "build institutional capacity; build technical capacity; training personnel; build capabilities; inter-agency coordination",
+#   "(?i)\\b(institutional\\s+capacity|technical\\s+capacity|training\\s+personnel|build\\s+capabilit(?:y|ies)|inter[-\\s]?agency\\s+coordination)\\b",
+# 
+#   "Policy mainstreaming & regulatory integration",
+#   "integrate adaptation into policies; integrate adaptation into legislation; policy integration; regulatory integration; embed adaptation; eco-label; green procurement",
+#   "(?i)\\b(mainstream(?:ing)?\\s+adaptation|integrat(?:e|ion)\\s+of\\s+adaptation\\s+into\\s+(?:polic(?:y|ies)|legislation|planning)|policy\\s+integration|regulatory\\s+integration|embed\\s+adaptation|eco[-\\s]?labell?ing|green\\s+procurement)\\b",
+# 
+#   "Cross-sectoral collaboration & partnerships",
+#   "cross-sectoral collaboration; partnerships; coordination across sectors; community partnerships",
+#   "(?i)\\b(cross[-\\s]?sectoral\\s+collaboration|partnerships?|coordination\\s+across\\s+sectors|community\\s+partnerships?)\\b",
+# 
+#   "Data management, knowledge & information services",
+#   "data management; data sharing; knowledge management; knowledge sharing; knowledge transfer; methodologies and tools",
+#   "(?i)\\b(data\\s+(?:management|sharing)|knowledge\\s+(?:management|sharing|transfer)|methodologies\\s+and\\s+tools|data|increase knwoledge|knowledge|database|public information|dissemination)\\b",
+# 
+#   "Evidence base, risk & impact assessments",
+#   "risk assessments; vulnerability assessments; risk and vulnerability assessment; impact reports; threat identification; geospatial mapping; transboundary; cross-border; vulnerability components; sector risk assessment; building/housing risk assessment",
+#   "(?i)\\b(risk\\s+assessments?|vulnerability\\s+assessments?|risk\\s+and\\s+vulnerability\\s+assessment|impact\\s+reports?|threat\\s+identification|geo[-\\s]?spatial\\s+mapping|transboundary|cross[-\\s]?border|vulnerability\\s+components|sector\\s+risk\\s+assessments?|housing\\s+infrastructure\\s+(?:risk|vulnerability)\\s+assessment|conduct|conducting)\\b",
+# 
+#   "Subnational adaptation priorities & sector packages",
+#   "ACT priorities; Northern Territory priorities; Queensland priorities; SA urban greening; biodiversity act; planning review; urban water strategy; WA strategy directions",
+#   "(?i)\\b(Australian\\s+Capital\\s+Territory|\\bACT\\b|Northern\\s+Territory|Queensland|South\\s+Australia|Urban\\s+Greening\\s+Strategy|biodiversity\\s+legislation|Planning\\s+Review|Urban\\s+Water\\s+Strategy|Western\\s+Australia|WA\\b\\s+Climate\\s+Adaptation\\s+Strategy)\\b",
+# 
+#   "Agro-meteorological & climate information services",
+#   "agro-meteorological services; climate information services; agricultural advisories; agrometeorological forecasts",
+#   "(?i)\\b(agro[-\\s]?meteorolog\\w+\\s+(?:services|forecasts?)|climate\\s+information\\s+services?|agricultur\\w*\\s+advisories)\\b",
+# 
+#   "Post-harvest, food loss reduction & risk transfer",
+#   "reduce crop loss; post-harvest technologies; postharvest; value addition; cold chain; crop insurance; export markets",
+#   "(?i)\\b(post\\s*harvest|post[-\\s]?harvest|value\\s+addition|cold\\s+chain|crop\\s+insurance|reduc(?:e|ing)\\s+crop\\s+loss(?:es)?|export\\s+markets?)\\b",
+# 
+#   "Climate-resilient livestock systems",
+#   "climate-resilient livestock; livestock management; heat/drought tolerant breeds; animal health; livestock insurance",
+#   "(?i)\\b(climate[-\\s]?resilien\\w+\\s+livestock|livestock\\s+(?:management|insurance|health)|heat[-\\s]?tolerant\\s+breeds?|drought[-\\s]?tolerant\\s+breeds?)\\b",
+# 
+#   "Research, innovation & investment (agri/health)",
+#   "investment in research; research and innovation; technology development; technology transfer; telemedicine; scientific support; technical support",
+#   "(?i)\\b(invest(?:ment)?\\s+in\\s+research|research\\s+and\\s+innovation|technology\\s+(?:development|transfer)|telemedicine|scientific\\s+support|technical\\s+support)\\b",
+# 
+#   "Fire management & response capability",
+#   "adaptive fire management; reduce causes of forest fires; response capability; prescribed burning; incident management training; local forest plans",
+#   "(?i)\\b(fire\\s+management|prescribed\\s+burn(?:s|ing)|reduce\\s+forest\\s+fires|response\\s+capability|incident\\s+management\\s+training|local\\s+forest\\s+plans?)\\b",
+# 
+#   "Community-based forest management & re/afforestation",
+#   "community-based forest management; reforestation initiatives; afforestation; community involvement in forest",
+#   "(?i)\\b(community[-\\s]?based\\s+forest\\s+management|reforestation\\b|afforestation\\b|community\\s+involvement\\s+in\\s+forest)\\b",
+# 
+#   "Biodiversity assessment & monitoring",
+#   "biodiversity assessment; biodiversity inventories; monitoring programs",
+#   "(?i)\\b(biodiversity\\s+assessment|biodiversity\\s+inventor(?:y|ies)|monitoring\\s+program(?:s|mes))\\b",
+# 
+#   "Public health: surveillance, systems & workforce",
+#   "early warning systems for disease; disease surveillance systems; surveillance and control; strengthen healthcare workforce; public health campaigns; malaria; vector-borne diseases; prevention; diagnostic",
+#   "(?i)\\b(early\\s+warning\\s+systems?\\s*(?:for\\s+)?(?:disease|health|heatwaves?)|disease\\s+surveillance\\s+systems?|surveillance\\s+and\\s+control|public\\s+health\\s+campaigns?|healthcare\\s+(?:capacity|workforce)|training\\s+healthcare\\s+professionals?|malaria|vector[-\\s]?borne\\s+diseases?|prevention|diagnostic|early warning|early warnings)\\b",
+# 
+#   "Public health infrastructure & services (incl. WASH, energy)",
+#   "health facilities; health establishments; hospitals; clinics; WASH; water and sanitation; backup power; renewable energy for health; protective measures; hardening",
+#   "(?i)\\b(health\\s+(?:facilit(?:y|ies)|establishments?|systems?)|hospitals?|clinics?|\\bWASH\\b|water\\s+and\\s+sanitation|backup\\s+power|renewable\\s+energy\\s+for\\s+health|protective\\s+measures|hardening|health service|health infrastructure|healthcare infrastructure)\\b",
+# 
+#   "Urban climate resilience & planning",
+#   "urban resilience; built environment; informal settlement upgrading; slum upgrading; stormwater management; waste management; SEZ; transport infrastructure and services; housing; design guidelines; infrastructure vulnerability assessments; climate-resilient infrastructure",
+#   "(?i)\\b(urban\\s+(?:planning|resilience)|built\\s+environment|informal\\s+settlement\\s+upgrading|slum\\s+upgrading|storm\\s*water\\s+management|waste\\s+management|\\bSEZ\\b|transport\\s+(?:infrastructure|services)|housing|design\\s+guidelines?|vulnerability\\s+assessments?\\s+of\\s+(?:infrastructure|buildings?|housing)|climate[-\\s]?resilien\\w+\\s+infrastructure|informal settlement|buildings|building)\\b",
+# 
+#   "Urban green/blue infrastructure & heat mitigation",
+#   "green infrastructure; urban greening; tree canopy; green spaces; bioswales; rain gardens; stormwater harvesting; cool roofs; permeable pavements; nature-based solutions; wetlands encroachment; road water harvesting",
+#   "(?i)\\b(green\\s+infrastructure|urban\\s+greening|tree\\s+canopy|green\\s+spaces?|bioswales?|rain\\s+gardens?|storm\\s*water\\s+harvesting|cool\\s+roofs?|permeable\\s+(?:pavements?|surfaces?)|nature[-\\s]?based\\s+solutions?|wetlands?\\s+encroachment|road\\s+water\\s+harvesting)\\b",
+# 
+#   "Disaster risk reduction, EWS & emergency management",
+#   "disaster risk reduction; DRR; early warning systems; public access to climate information; emergency responders training; forecast-based financing; early action protocols; emergency management system; unified command; loss and damage",
+#   "(?i)\\b(disaster\\s+risk\\s+reduction|\\bDRR\\b|early\\s+warning\\s+systems?|public\\s+access\\s+to\\s+climate\\s+information|emergency\\s+responders?\\s+training|forecast[-\\s]?based\\s+financing|early\\s+action\\s+protocols?|emergency\\s+management\\s+system|unified\\s+command|loss(?:es)?\\s+and\\s+damages?)\\b",
+# 
+#   "Energy & grid resilience",
+#   "grid resilience enhancement; energy infrastructure; climate proofing energy; renewable energy supply chain; backup power",
+#   "(?i)\\b(grid\\s+resilienc\\w+|energy\\s+infrastructure|climate\\s+proofing\\s+energy|renewable\\s+energy\\s+supply\\s+chain|backup\\s+power|energy sector|energy|power|cooling)\\b",
+# 
+#   "Coastal & marine ecosystem protection/restoration",
+#   "coastal fringe; coastline resilience; mangroves; mangrove management plan; mangrove ecotourism; seaweed farming; blue carbon; coastal wetlands; shoreline retention; bay construction; bay restoration; coastal restoration; marine ecosystems",
+#   "(?i)\\b(coastal\\s+fringe|coastline\\s+resilienc\\w+|mangroves?|mangrove\\s+management\\s+plan|mangrove\\s+ecotourism|seaweed\\s+farming|blue\\s+carbon|coastal\\s+wetlands?|shoreline\\s+retention|bay\\s+(?:construction|restoration)|coastal\\s+restoration|marine\\s+ecosystem(?:s)?|coral|reef|reefs)\\b",
+# 
+#   "Agricultural resource efficiency & high-standard farmland",
+#   "high-standard farmland; fertilizer utilization rate; pesticide utilization rate; plastic film recycling; manure utilization; degraded farmland treatment",
+#   "(?i)\\b(high[-\\s]?standard\\s+farmland|fertili[sz]er\\s+utili[sz]ation\\s+rate|pesticide\\s+utili[sz]ation\\s+rate|plastic\\s+film\\s+recycling|manure\\s+utili[sz]ation|degraded\\s+farmland\\s+(?:treatment|restoration))\\b",
+# 
+#   "Water allocation, security & quantified targets",
+#   "water security; total water consumption; consumption cap; optimized allocation of water resources; water supply capacity; emergency backup water sources; rural tap water coverage; national water security",
+#   "(?i)\\b(water\\s+security|total\\s+water\\s+consumption|consumption\\s+cap|optim(?:i|)s(?:e|ed)\\s+allocation\\s+of\\s+water\\s+resources|water\\s+supply\\s+capacity|emergency\\s+backup\\s+water\\s+source(?:s)?|rural\\s+tap\\s+water\\s+coverage|national\\s+water\\s+security)\\b",
+# 
+#   "Transport infrastructure & services adaptation",
+#   "improved transport infrastructure and services; roads; railways; ports; airports; mobility",
+#   "(?i)\\b(transport\\s+(?:infrastructure|services)|roads?|railways?|ports?|airports?|mobility|transport)\\b",
+# 
+#   "Industry & mining adaptation",
+#   "climate compatible mining; industrial adaptation; industry resilience",
+#   "(?i)\\b(mining|climate\\s+compatible\\s+mining|industrial\\s+adaptation|industry\\s+resilience)\\b",
+# 
+#   "Sectoral adaptation plans & guidelines",
+#   "sector adaptation plans; sector guidelines; sector risk assessments; sector action plans; tourism guidelines; action plans for the sector",
+#   "(?i)\\b(sector(?:al)?\\s+(?:adaptation\\s+)?plans?|sector\\s+guidelines?|sector\\s+risk\\s+assessments?|sector\\s+action\\s+plans?|tourism\\s+guidelines?)\\b",
+# 
+#   "Finance, insurance & social protection",
+#   "mobilize capital; mobilizing capital; mobilization of capital; green investments; access to climate finance; insurance; social safety nets; capital markets; credit lines; enterprise funds; CCCF",
+#   "(?i)\\b(mobiliz(?:e|ing|ation)\\s+(?:capital|investment)|green\\s+investments?|access\\s+to\\s+climate\\s+finance|insurance|social\\s+safety\\s+nets?|capital\\s+markets?|credit\\s+lines?|enterprise\\s+funds?|\\bCCCFs?|funds|funding\\b)\\b",
+# 
+#   "Tourism sector adaptation",
+#   "tourism sector; seaside tourism; tourism model; ecotourism; tourism action plans",
+#   "(?i)\\b(tourism|seaside\\s+tourism|tourism\\s+model|ecotourism|tourism\\s+action\\s+plans?)\\b",
+# 
+#   "Gender & social inclusion",
+#   "gender perspective; women; girls; indigenous people; just transition; inclusion; vulnerable groups",
+#   "(?i)\\b(gender\\s+perspective|women|girls|indigenous|just\\s+transition|inclusion|vulnerable\\s+groups|just transition|aboriginal)\\b"
+# ) 
+# 
+# # Merge manual Regex with auto-generated one from Keywords
+# priority_categories <- ensure_keywords_covered(priority_categories)
+# 
+# # -----------------------------
+# # Classifier
+# # -----------------------------
+# match_priorities <- function(txt, map = priority_categories) {
+#   if (is.na(txt) || !nzchar(txt)) return(character(0))
+#   s <- clean_ap_text(txt)
+#   hits <- map$Category[ map_lgl(map$Regex, ~ str_detect(s, .x)) ]
+#   unique(hits)
+# }
+# 
+# categorize_priority_vector <- function(v, map = priority_categories) {
+#   map_chr(v, ~{
+#     cats <- match_priorities(.x, map = map)
+#     if (length(cats) == 0) NA_character_ else paste(cats, collapse = "; ")
+#   })
+# }
+# 
+# # -----------------------------
+# # Apply to your data (Element == "Adaptation priorities")
+# # -----------------------------
+# stopifnot(exists("adaptdata"))
+# 
+# # Select the text column (prefer ElementText, fallback ElementText_MAN, else NA)
+# text_choices <- intersect(c("ElementText", "ElementText_MAN"), names(adaptdata))
+# if (length(text_choices) == 0L) stop("No ElementText or ElementText_MAN columns found.")
+# 
+# ap_rows <- adaptdata %>% filter(tolower(Element) == "adaptation priorities")
+# 
+# if (nrow(ap_rows) > 0) {
+#   ap_rows <- ap_rows %>%
+#     mutate(.TextForScan = coalesce(!!!rlang::syms(text_choices))) %>%
+#     mutate(PriorityCategories = categorize_priority_vector(.TextForScan)) %>%
+#     select(-.TextForScan)
+# 
+#   # Ensure column exists on base; then left-join updates back (keeps original row order)
+#   # Ensure column exists in adaptdata
+# if (!"PriorityCategories" %in% names(adaptdata)) {
+#   adaptdata <- adaptdata %>% mutate(PriorityCategories = NA_character_)
+# }
+# 
+# # Update only rows that are adaptation priorities
+# adaptdata <- adaptdata %>%
+#   mutate(
+#     PriorityCategories = if_else(
+#       tolower(Element) == "adaptation priorities",
+#       categorize_priority_vector(coalesce(!!!rlang::syms(text_choices))),
+#       PriorityCategories
+#     )
+#   )
+# 
+# 
+#   cov_ap <- adaptdata %>%
+#     filter(tolower(Element) == "adaptation priorities") %>%
+#     summarise(cov = mean(!is.na(PriorityCategories))) %>% pull(cov)
+# 
+#   message(sprintf("Adaptation priorities categorization coverage: %.1f%%",
+#                   100 * cov_ap))
+# } else {
+#   message("No rows with Element == 'Adaptation priorities' found.")
+# }
+# 
+# # Optional export:
+# # write_csv(adaptdata, "adaptdata_with_priority_categories.csv")
+# 
 
-RESULT_LABELS <- c("Input","Process","Output","Outcome")
-
-
-result_counts <- actiontyp_plus_results %>%
-  filter(Element == "Result",
-         !is.na(ResultType_GPT),
-         nzchar(ResultType_GPT)) %>%
-  mutate(ResultType_GPT = str_squish(ResultType_GPT)) %>%
-  # map to canonical labels & drop anything off-list (just in case)
-  mutate(ResultType_GPT = sapply(ResultType_GPT, function(t) {
-    hit <- RESULT_LABELS[tolower(RESULT_LABELS) == tolower(t)]
-    ifelse(length(hit), hit, NA_character_)
-  })) %>%
-  filter(!is.na(ResultType_GPT)) %>%
-  mutate(ResultType_GPT = factor(ResultType_GPT, levels = RESULT_LABELS)) %>%
-  count(ResultType_GPT, name = "Occurrences") %>%
-  arrange(ResultType_GPT) %>%
-  mutate(Share = Occurrences / sum(Occurrences),
-         Label = paste0(Occurrences, " (", round(Share*100), "%)"))
-
-
-# horizontal bars with counts + %
-p_results <- ggplot(result_counts,
-  aes(x = ResultType_GPT, y = Occurrences, fill = ResultType_GPT)) +
-  geom_col(width = 0.7, show.legend = FALSE) +
-  geom_text(aes(label = Label), hjust = -0.15, size = 4) +
-  coord_flip(ylim = c(0, max(result_counts$Occurrences)*1.15)) +
-  scale_fill_brewer(palette = "Set2") +  # swap palette if you like
-  labs(title = "Result types by count",
-       x = NULL, y = "Occurrences") +
-  theme_minimal(base_size = 12) +
-  theme(axis.text.y = element_text(size = 13),
-        axis.text.x = element_text(size = 12))
-
-p_results
 ```
 
 # link to overview
 
 ```{r,echo=FALSE}
 
-
-adaptdata <- read_csv("adaptdatafinal.csv")
-
-# Ensure both datasets have the Country column
-# Check for extra whitespace or formatting issues
-adaptdata$Country <- trimws(adaptdata$Country)
-overview$Country <- trimws(overview$Country)
-
-# Merge metadata from 'overview' to 'adaptdata' by Country
-adaptdata <- merge(adaptdata, overview, by = "Country", all.x = TRUE)
+# 
+# #adaptdata <- read_csv("adaptdatafinal.csv")
+# 
+# # Ensure both datasets have the Country column
+# # Check for extra whitespace or formatting issues
+# adaptdata$Country <- trimws(adaptdata$Country)
+# overview$Country <- trimws(overview$Country)
+# 
+# # Merge metadata from 'overview' to 'adaptdata' by Country
+# adaptdata <- merge(adaptdata, overview, by = "Country", all.x = TRUE)
 
 ```
 
 # Save data to a local file
 
 ```{r,echo=FALSE}
-# Convert any list columns to character columns
-adaptdata[] <- lapply(adaptdata, function(col) {
-  if (is.list(col)) {
-    sapply(col, function(x) paste(unlist(x), collapse = "; "))
-  } else {
-    col
-  }
-})
-
-write.csv(adaptdata,"AdaptationElementsProcessed.csv")
+# # Convert any list columns to character columns
+# adaptdata[] <- lapply(adaptdata, function(col) {
+#   if (is.list(col)) {
+#     sapply(col, function(x) paste(unlist(x), collapse = "; "))
+#   } else {
+#     col
+#   }
+# })
+# 
+# #write.csv(adaptdata,"AdaptationElementsProcessed.csv")
 ```
 
 
 ```{r,echo=FALSE}
-#------- Missing classifications
-# 1) Clean NA-like strings
-adapt_clean <- adaptdata %>%
-  mutate(across(
-    c(SectorType, SectorType_GGA),
-    ~na_if(trimws(.), "")
-  )) %>%
-  mutate(across(
-    c(SectorType, SectorType_GGA),
-    ~na_if(., "NA")
-  ))
-
-# 2) Filter: Element is "System at risk" AND both sector fields are missing
-missing_sector_rows <- adapt_clean %>%
-  filter(
-    Element == "System at risk",
-    is.na(SectorType),
-    is.na(SectorType_GGA)
-  ) %>%
-  # pick columns you want in the export (add/remove as needed)
-  select(
-    Country, Document, Element, ElementLabel,HazardType, SystemType, Sector, SectorType, SectorType_GGA,
-    ElementText
-  )
-
-write.csv(missing_sector_rows, "missing_ipcc_gga_for_system_at_risk.csv", row.names = FALSE)
-
-# Filter: Element == "System at risk" AND SystemType is missing
-system_at_risk_but_no_system <- adapt_clean %>%
-  filter(
-    Element == "System at risk",
-    is.na(SystemType)
-  ) %>%
-  select(
-    Country, Document, Element, ElementText,HazardType,
-    SystemType, SectorType, SectorType_GGA
-  )
-
-write.csv(system_at_risk_but_no_system,
-          "system_at_risk_without_systemtype.csv",
-          row.names = FALSE)
+# #------- Missing classifications
+# # 1) Clean NA-like strings
+# adapt_clean <- adaptdata %>%
+#   mutate(across(
+#     c(SectorType, SectorType_GGA),
+#     ~na_if(trimws(.), "")
+#   )) %>%
+#   mutate(across(
+#     c(SectorType, SectorType_GGA),
+#     ~na_if(., "NA")
+#   ))
+# 
+# # 2) Filter: Element is "System at risk" AND both sector fields are missing
+# missing_sector_rows <- adapt_clean %>%
+#   filter(
+#     Element == "System at risk",
+#     is.na(SectorType),
+#     is.na(SectorType_GGA)
+#   ) %>%
+#   # pick columns you want in the export (add/remove as needed)
+#   select(
+#     Country, Document, Element, ElementLabel,HazardType, SystemType, Sector, SectorType, SectorType_GGA,
+#     ElementText
+#   )
+# 
+# write.csv(missing_sector_rows, "missing_ipcc_gga_for_system_at_risk.csv", row.names = FALSE)
+# 
+# # Filter: Element == "System at risk" AND SystemType is missing
+# system_at_risk_but_no_system <- adapt_clean %>%
+#   filter(
+#     Element == "System at risk",
+#     is.na(SystemType)
+#   ) %>%
+#   select(
+#     Country, Document, Element, ElementText,HazardType,
+#     SystemType, SectorType, SectorType_GGA
+#   )
+# 
+# write.csv(system_at_risk_but_no_system,
+#           "system_at_risk_without_systemtype.csv",
+#           row.names = FALSE)
 
 ```
 
@@ -2381,36 +3036,36 @@ write.csv(system_at_risk_but_no_system,
 
 ```{r,echo=FALSE}
 # -------- Build triples (System -> IPCC -> GGA) --------
-
-library(dplyr)
-library(tidyr)
-library(stringr)
-
-# Clean NA-like strings and whitespace
-adaptdata <- adaptdata %>%
-  mutate(across(
-    c(SystemType, SectorType, SectorType_GGA),
-    ~na_if(trimws(.), "")
-  )) %>%
-  mutate(across(
-    c(SystemType, SectorType, SectorType_GGA),
-    ~na_if(., "NA")  # Handle "NA" strings
-  ))
-
-triples <- adaptdata %>%
-  filter(
-    !is.na(SystemType),
-    !is.na(SectorType),
-    !is.na(SectorType_GGA)
-  ) %>%
-  count(SystemType, SectorType, SectorType_GGA, name = "value") %>%
-  arrange(desc(value))
-
-edges_sys_sector <- triples %>%
-  count(from = SystemType, to = SectorType, wt = value, name = "value")
-edges_sector_gga <- triples %>%
-  count(from = SectorType, to = SectorType_GGA, wt = value, name = "value")
-
+# 
+# library(dplyr)
+# library(tidyr)
+# library(stringr)
+# 
+# # Clean NA-like strings and whitespace
+# adaptdata <- adaptdata %>%
+#   mutate(across(
+#     c(SystemType, SectorType, SectorType_GGA),
+#     ~na_if(trimws(.), "")
+#   )) %>%
+#   mutate(across(
+#     c(SystemType, SectorType, SectorType_GGA),
+#     ~na_if(., "NA")  # Handle "NA" strings
+#   ))
+# 
+# triples <- adaptdata %>%
+#   filter(
+#     !is.na(SystemType),
+#     !is.na(SectorType),
+#     !is.na(SectorType_GGA)
+#   ) %>%
+#   count(SystemType, SectorType, SectorType_GGA, name = "value") %>%
+#   arrange(desc(value))
+# 
+# edges_sys_sector <- triples %>%
+#   count(from = SystemType, to = SectorType, wt = value, name = "value")
+# edges_sector_gga <- triples %>%
+#   count(from = SectorType, to = SectorType_GGA, wt = value, name = "value")
+# 
 
 ```
 
