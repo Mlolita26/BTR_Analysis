@@ -292,6 +292,22 @@ region_key <- overview %>%
   select(Country, Region) %>%
   distinct()
 
+# add manual fixes for missing countries
+manual_add <- tibble::tribble(
+  ~Country,        ~Region,
+  "Moldova",       "Eastern Europe",
+  "Phillipines",   "Asia-Pacific",
+  "Russia",        "Eastern Europe",
+  "Türkiye",       "Asia-Pacific",
+  "USA",           "Western Europe and Other states"
+)
+
+# combine with existing region_key
+region_key <- region_key %>%
+  bind_rows(manual_add) %>%
+  distinct()
+
+
 adaptdata_with_region <- adaptdata %>%
   left_join(region_key, by = "Country")
 
@@ -607,6 +623,22 @@ by regions
 region_key <- overview %>%
   select(Country, Region) %>%
   distinct()
+
+# add manual fixes for missing countries
+manual_add <- tibble::tribble(
+  ~Country,        ~Region,
+  "Moldova",       "Eastern Europe",
+  "Phillipines",   "Asia-Pacific",
+  "Russia",        "Eastern Europe",
+  "Türkiye",       "Asia-Pacific",
+  "USA",           "Western Europe and Other states"
+)
+
+# combine with existing region_key
+region_key <- region_key %>%
+  bind_rows(manual_add) %>%
+  distinct()
+
 
 adaptdata_with_region <- adaptdata %>%
   left_join(region_key, by = "Country")
@@ -1174,19 +1206,17 @@ datatable(
 #   library(glue)
 #   library(DT)
 #   library(ellmer)
+#   library(readr)
 # })
 # 
 # # =================== Config ===================
 # MODEL       <- "gpt-5-nano"
-# RUN_TAG     <- "gpt6nano"
+# RUN_TAG     <- "gpt6nano_batch"
 # OUTPUT_DIR  <- "out"
 # OUTPUT_CSV  <- file.path(OUTPUT_DIR, paste0("climate_impact_keywords_", RUN_TAG, ".csv"))
-# ERROR_LOG   <- file.path(OUTPUT_DIR, paste0("ci_errors_", RUN_TAG, ".log"))
-# SAVE_EVERY  <- 25
+# ADAPT_OUT   <- paste0("adaptdata_climateimpact_", RUN_TAG, ".csv")
+# CHUNK_SIZE  <- 50
 # MAX_CHARS   <- 6000
-# 
-# # Previous results file (from older run)
-# PREV_CSV    <- "adaptdata_climateimpact5nano.csv"
 # 
 # # ---- API key ----
 # btr_key <- Sys.getenv("BTR_KEY")
@@ -1211,16 +1241,9 @@ datatable(
 #   TRUE
 # }
 # 
-# log_error <- function(msg) {
-#   try({
-#     cat(sprintf("[%s] %s\n", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), msg),
-#         file = ERROR_LOG, append = TRUE)
-#   }, silent = TRUE)
-# }
-# 
-# make_preview_html <- function(txt) {
-#   ifelse(nchar(txt) > 90,
-#          paste0("<span title='", txt, "'>", substr(txt, 1, 90), "...</span>"),
+# make_preview_html <- function(txt, n = 90) {
+#   ifelse(nchar(txt) > n,
+#          paste0("<span title='", txt, "'>", substr(txt, 1, n), "...</span>"),
 #          txt)
 # }
 # 
@@ -1231,10 +1254,10 @@ datatable(
 #   paste0(head, "\n...\n", tail)
 # }
 # 
-# # ---------- Prompt ----------
-# make_ci_prompt <- function(txt) {
+# # ---------- Batch prompt (same content as your single-row prompt, adapted for N rows) ----------
+# make_ci_keywords_batch_prompt <- function(txts) {
 #   glue::glue(
-# 'Read the "Climate impact" passage.
+# 'Read each "Climate impact" passage.
 # 
 # Extract short key keywords that describe the CONSEQUENCES/IMPACTS of climate (what happens to people, ecosystems, services, assets).
 # Rules:
@@ -1242,175 +1265,97 @@ datatable(
 # - Examples: "water shortage"; "crop yield loss"; "infrastructure damage"; "heat-related illness"; "biodiversity loss"; "coastal erosion".
 # - Exclude drivers/hazards (e.g., "heat wave", "drought") unless the text itself presents them as the impact (e.g., "increased flooding").
 # - Exclude actions/measures (e.g., "irrigation expansion", "early warning system").
-# - Return ONE line only: keywords separated by "; ".
+# - Return N lines (one per input, in the same order). Each line: keywords separated by "; ".
 # 
-# TEXT:
-# """{clip_text(txt)}"""'
+# INPUTS (numbered):
+# {paste0(sprintf("%d) %s", seq_along(txts), txts), collapse = "\n")}'
 #   )
 # }
 # 
-# # ---------- Client (no rate limit) ----------
-# chat_client <- ellmer::chat_openai(model = MODEL)
-# extract_once <- function(txt) chat_client$chat(make_ci_prompt(txt))
+# # ---------- Batch classifier ----------
+# classify_ci_keywords_batch <- function(txts, model = MODEL, chunk_size = CHUNK_SIZE) {
+#   if (!length(txts)) return(character(0))
+#   chat <- ellmer::chat_openai(model = model)
+#   out  <- vector("character", length(txts))
 # 
-# extract_ci_keywords <- function(txt) {
-#   if (is.na(txt) || !nzchar(txt)) return(NA_character_)
-#   tries <- 0; last_err <- ""
-#   repeat {
-#     tries <- tries + 1
-#     out <- try(extract_once(txt), silent = TRUE)
-#     if (!inherits(out, "try-error")) {
-#       out <- trimws(out)
-#       return(if (nzchar(out)) out else NA_character_)
+#   idx <- seq_along(txts)
+#   chunks <- split(idx, ceiling(idx / chunk_size))
+# 
+#   pb <- txtProgressBar(min = 0, max = length(chunks), style = 3)
+#   on.exit(close(pb), add = TRUE)
+# 
+#   for (i in seq_along(chunks)) {
+#     ids <- chunks[[i]]
+#     clipped <- vapply(txts[ids], clip_text, character(1))
+#     prompt  <- make_ci_keywords_batch_prompt(clipped)
+# 
+#     ans <- tryCatch(chat$chat(prompt), error = function(e) e)
+#     if (inherits(ans, "error")) {
+#       warning("GPT batch failed: ", conditionMessage(ans), " — assigning NA for this chunk.")
+#       out[ids] <- NA_character_
+#       setTxtProgressBar(pb, i); next
 #     }
-#     last_err <- conditionMessage(attr(out, "condition"))
-#     if (grepl("context|token|length|too long|maximum", last_err, ignore.case = TRUE)) {
-#       txt <- clip_text(txt, max_chars = round(MAX_CHARS * 0.7))
-#     }
-#     if (tries >= 5) { log_error(paste("API error after retries:", last_err)); return(NA_character_) }
-#     Sys.sleep(min(runif(1, 1, 2) * (2^(tries - 1)), 30))  # backoff only on errors
+# 
+#     # Expect one line per input; clean; strip accidental numbering if present
+#     lines <- strsplit(ans, "\\r?\\n", perl = TRUE)[[1]]
+#     lines <- trimws(lines)
+#     lines <- lines[nzchar(lines)]
+#     lines <- sub("^[0-9]+[.)\\-:]\\s*", "", lines, perl = TRUE)
+# 
+#     # Align with input length
+#     if (length(lines) < length(ids)) lines <- c(lines, rep(NA_character_, length(ids) - length(lines)))
+#     if (length(lines) > length(ids)) lines <- lines[seq_along(ids)]
+# 
+#     out[ids] <- lines
+#     setTxtProgressBar(pb, i)
 #   }
+# 
+#   out
 # }
 # 
-# # =================== Data prep (content-key based) ===================
+# # =================== Data prep & run on ALL climate-impact rows ===================
 # stopifnot(exists("adaptdata"))
+# stopifnot(all(c("Country","Document","Element","ElementText") %in% names(adaptdata)))
 # 
-# # Keep RowID if present (for preview/export); otherwise create one (does NOT affect exclusion)
+# # Ensure RowID exists for export
 # if (!"RowID" %in% names(adaptdata)) {
-#   # if the first column looks like an index (e.g., ...1), keep it as RowID; else generate
-#   first_col <- names(adaptdata)[1]
-#   if (!"RowID" %in% names(adaptdata)) {
-#     names(adaptdata)[1] <- "RowID"
-#     message(sprintf("Using first column '%s' as RowID.", first_col))
-#   }
+#   adaptdata <- adaptdata %>% tibble::rowid_to_column("RowID")
 # }
+# 
 # if (!"ClimateImpact_Keywords" %in% names(adaptdata)) {
 #   adaptdata$ClimateImpact_Keywords <- NA_character_
 # }
 # 
-# # Helper to build a stable content key
-# make_key <- function(df) {
-#   paste(
-#     df$Country |> as.character() |> trimws(),
-#     df$Document |> as.character() |> trimws(),
-#     df$Element  |> as.character() |> trimws() |> tolower(),
-#     df$ElementText |> as.character() |> trimws(),
-#     sep = " | "
-#   )
-# }
+# ci_idx <- which(grepl("^\\s*Climate impact\\s*$", adaptdata$Element, ignore.case = TRUE))
 # 
-# # Current climate-impact rows + key
-# cur_clim_idx <- which(grepl("^\\s*Climate impact\\s*$", adaptdata$Element, ignore.case = TRUE))
-# c# ---------- NA-safe helpers ----------
-# nzchr <- function(x) trimws(ifelse(is.na(x), "", as.character(x)))
-# 
-# make_key <- function(df) {
-#   paste(
-#     nzchr(df$Country),
-#     nzchr(df$Document),
-#     tolower(nzchr(df$Element)),
-#     nzchr(df$ElementText),
-#     sep = " | "
-#   )
-# }
-# 
-# # ---------------- Current climate-impact rows + key ----------------
-# cur_clim_idx <- which(grepl("^\\s*Climate impact\\s*$", adaptdata$Element, ignore.case = TRUE))
-# cur_clim <- adaptdata[cur_clim_idx, , drop = FALSE]
-# cur_clim$.key <- make_key(cur_clim)
-# 
-# n_all <- nrow(cur_clim)
-# 
-# # ---------------- Previous climate-impact keys (from CSV) ----------------
-# prev_keys <- character(0)
-# if (file.exists(PREV_CSV)) {
-#   prev_raw <- try(read.csv(PREV_CSV, stringsAsFactors = FALSE), silent = TRUE)
-#   if (!inherits(prev_raw, "try-error")) {
-#     has_cols <- all(c("Country","Document","Element","ElementText") %in% names(prev_raw))
-#     if (has_cols) {
-#       prev_clim <- prev_raw[grepl("^\\s*Climate impact\\s*$", prev_raw$Element, ignore.case = TRUE), , drop = FALSE]
-#       prev_clim$.key <- make_key(prev_clim)
-#       prev_keys <- unique(prev_clim$.key)
-#       message(sprintf("Loaded previous climate rows: %d unique keys.", length(prev_keys)))
-#     } else {
-#       message("⚠ Previous CSV lacks required columns (Country, Document, Element, ElementText); proceeding without exclusions.")
-#     }
-#   } else {
-#     message("⚠ Could not read previous CSV; proceeding without exclusions.")
-#   }
+# if (length(ci_idx)) {
+#   message("Classifying Climate impact keywords for ", length(ci_idx), " rows in batches...")
+#   adaptdata$ClimateImpact_Keywords[ci_idx] <-
+#     classify_ci_keywords_batch(adaptdata$ElementText[ci_idx],
+#                                model = MODEL,
+#                                chunk_size = CHUNK_SIZE)
 # } else {
-#   message("⚠ Previous CSV not found; no exclusions will be applied.")
+#   message("No rows with Element == 'Climate impact' found.")
 # }
 # 
-# # ---------------- Remaining = anti-join by content key ----------------
-# remaining_mask <- !(cur_clim$.key %in% prev_keys)
-# remaining_idx_in_cur <- which(remaining_mask)
-# remaining_global_idx  <- cur_clim_idx[remaining_idx_in_cur]
-# n_rem <- length(remaining_global_idx)
+# # Save full adaptdata and a preview CSV
+# readr::write_csv(adaptdata, "adaptdata_climate_keywords_batch.csv")
 # 
-# 
-# 
-# 
-# message(sprintf("Climate impact rows (current): %d • Already in previous: %d • To extract now: %d",
-#                 n_all, n_all - n_rem, n_rem))
-# 
-# # =================== Extraction (only on remaining) ===================
-# if (n_rem > 0) {
-#   use_progress <- requireNamespace("progress", quietly = TRUE)
-#   if (use_progress) {
-#     pb <- progress::progress_bar$new(
-#       format = paste0("Extracting [:bar] :current/:total (:percent) ETA::eta • model=", MODEL, " • last=:last"),
-#       total = n_rem, clear = FALSE, width = 80
-#     )
-#   }
-#   for (k in seq_along(remaining_global_idx)) {
-#     i <- remaining_global_idx[k]
-#     out <- try(extract_ci_keywords(adaptdata$ElementText[i]), silent = TRUE)
-#     if (inherits(out, "try-error")) {
-#       log_error(paste("Unhandled error:", conditionMessage(attr(out, "condition"))))
-#       out <- NA_character_
-#     }
-#     adaptdata$ClimateImpact_Keywords[i] <- out
-# 
-#     if (use_progress) {
-#       pb$tick(tokens = list(last = substr(ifelse(is.na(out), "NA", out), 1, 28)))
-#     } else if (k %% 10 == 0) {
-#       message(sprintf("... %d/%d done (%.1f%%)", k, n_rem, 100*k/n_rem))
-#     }
-# 
-#     # checkpoint save
-#     if (k %% SAVE_EVERY == 0 || k == n_rem) {
-#       ci_preview_all <- adaptdata %>%
-#         slice(cur_clim_idx) %>%
-#         transmute(
-#           RowID = if ("RowID" %in% names(adaptdata)) RowID else row_number(),
-#           Country, Document,
-#           ElementText = make_preview_html(ElementText),
-#           ClimateImpact_Keywords
-#         )
-#       safe_write_csv(ci_preview_all, OUTPUT_CSV)
-#     }
-#   }
-# }
-# 
-# write.csv(adaptdata,"adaptdata_climateimpact6nano.csv")
-# 
-# # =================== Final preview/export ===================
 # ci_preview_all <- adaptdata %>%
-#   slice(cur_clim_idx) %>%
+#   slice(ci_idx) %>%
 #   transmute(
-#     RowID = if ("RowID" %in% names(adaptdata)) RowID else row_number(),
-#     Country, Document,
+#     RowID, Country, Document,
 #     ElementText = make_preview_html(ElementText),
 #     ClimateImpact_Keywords
 #   )
 # 
+# safe_write_csv(ci_preview_all, OUTPUT_CSV)
+# 
 # DT::datatable(
 #   ci_preview_all, escape = FALSE,
-#   caption = paste0("📄 Climate impact — extracted keywords (", RUN_TAG, ", content-key exclusion)"),
-#   options = list(pageLength = 10, dom = "tip")
+#   caption = paste0("📄 Climate impact — extracted keywords (", RUN_TAG, ", batched)"),
+#   options = list(pageLength = 10, dom = "tip", autoWidth = TRUE)
 # )
-# 
 
 ```
 
@@ -1796,7 +1741,7 @@ if (nrow(sys_with_impacts) == 0L) {
 
 
 
-write.csv(adaptdata, "adaptdata_climateimpact6nano_cat_sys.csv", row.names = FALSE)
+#write.csv(adaptdata, "adaptdata_climateimpact6nano_cat_sys_batch.csv", row.names = FALSE)
 
 
 ```
@@ -1806,23 +1751,44 @@ write.csv(adaptdata, "adaptdata_climateimpact6nano_cat_sys.csv", row.names = FAL
 
 ```{r,echo=FALSE}
 
+
+
 #load manualy checked data
-adaptdata <- read_csv("adaptdata_climateimpact6nano_cat_sys.csv")
+adaptdata <- read_csv("adaptdata_climateimpact6nano_cat_sys_batch_manual.csv")
+
+adaptdata <- adaptdata %>%
+  group_by(Country, Document, Element, ElementLabel, ElementText) %>%
+  summarise(across(everything(), ~ first(na.omit(.x))), .groups = "drop") %>%
+  distinct()
 
 # 1. Filter and separate multiple SystemType values
 impact_counts <- adaptdata %>%
   filter(Element == "Climate impact",
          !is.na(ImpactCategories),
-         str_detect(ImpactCategories, "\\S")) %>%            # has any non-space
-  separate_rows(ImpactCategories, sep = ";") %>%             # split on ;
+         str_detect(ImpactCategories, "\\S")) %>%
+  # split on semicolon OR comma
+  separate_rows(ImpactCategories, sep = ";|,") %>%      
   mutate(
-    ImpactCategories = str_replace_all(ImpactCategories, "\\p{Zs}+", " "), # normalize unicode spaces
-    ImpactCategories = str_squish(ImpactCategories)                         # trim ends + collapse internal
+    ImpactCategories = str_replace_all(ImpactCategories, "\\p{Zs}+", " "), # normalize spaces
+    ImpactCategories = str_squish(ImpactCategories),                       # trim & clean
+    # fix common typos / variants
+    ImpactCategories = recode(ImpactCategories,
+      "Economic & livelihood losse" = "Economic & livelihood losses",
+      "Economic & livelihood loss"  = "Economic & livelihood losses",
+      "Humna health burden"         = "Human health burden",
+      "Livestock imapcts"           = "Livestock impacts",
+      "Tourism & recreation imapcts"= "Tourism & recreation impacts",
+      "Damage to buildings and infrastructure, Energy systems impacts" = "Damage to buildings & infrastructure", 
+      "Crop production loss, Livestock impacts" = "Crop production loss"
+    )
   ) %>%
-  filter(ImpactCategories != "") %>%                          # drop empty tokens
+  filter(ImpactCategories != "") %>%
   count(ImpactCategories, sort = TRUE) %>%
   rename(`Impact Category` = ImpactCategories,
          Occurrences = n)
+
+
+
 
 # 2. Display the interactive table
 DT::datatable(
@@ -1862,6 +1828,21 @@ by regions
 
 region_key <- overview %>%
   select(Country, Region) %>%
+  distinct()
+
+# add manual fixes for missing countries
+manual_add <- tibble::tribble(
+  ~Country,        ~Region,
+  "Moldova",       "Eastern Europe",
+  "Phillipines",   "Asia-Pacific",
+  "Russia",        "Eastern Europe",
+  "Türkiye",       "Asia-Pacific",
+  "USA",           "Western Europe and Other states"
+)
+
+# combine with existing region_key
+region_key <- region_key %>%
+  bind_rows(manual_add) %>%
   distinct()
 
 adaptdata_with_region <- adaptdata %>%
@@ -1991,6 +1972,62 @@ DT::datatable(
 ## 5.1 Action type
 
 **Goal.** Tag each *Action* with a single **type** to describe the primary adaptation approach.
+
+# Action Type & Intervention Categories
+
+This dataset classifies climate adaptation measures into broad **intervention categories**.  
+Each intervention contains **types**, which group related actions, and each type includes specific **actions** (and sometimes subactions).  
+
+## Intervention Categories
+
+### *Ecosystem based*
+Focus on maintaining and restoring natural systems.  
+Includes intervention types such as:  
+- **Biodiversity development** – actions to enhance biodiversity (e.g., ecological buffer zones, pollination support).  
+- **Ecological restoration** – restoring degraded ecosystems (e.g., afforestation, climate-resilient trees).  
+- **Green infrastructure** – using vegetation and permeable systems for adaptation (e.g., rain gardens, green roofs).  
+- **Agroforestry** – integrating trees into agricultural systems.  
+- **Animals** – livestock and aquaculture resilience.  
+- **Crop diversification** – multiple crops to reduce risk.  
+- **Energy** – biogas, improved cookstoves, etc.  
+- **Migration** – relocating crops/livestock in response to climate.  
+- **Nutrient management** – compost, manure, fertility practices.  
+- **Pest and disease management** – integrated pest management, biological control.  
+- **Postharvest** – storage, drying, reducing food loss.  
+- **Schedule modification** – shifting planting/harvest calendars.  
+- **Soil management** – mulching, conservation tillage, improved fallows.  
+- **Water management** – irrigation efficiency, water harvesting.
+
+---
+
+### *Institutional*
+Policies, governance, and frameworks enabling adaptation.  
+Includes:  
+- **Economic (policy level)** – finance and incentives from institutions (grants, subsidies, PES).  
+- **Government policies and programs** – national/local adaptation plans, sectoral programs.  
+- **Laws and regulations** – binding rules such as zoning, building codes, protected areas.  
+- **Research development** – climate modeling, monitoring, R&D, policy analysis.
+
+---
+
+### *Social*
+Adaptation driven by people, communities, and knowledge.  
+Includes:  
+- **Behavioural** – household/community practices (diet change, water storage, advocacy).  
+- **Educational** – awareness, training, gender & inclusion, extension services.  
+- **Informational** – climate/market/health information, early warning systems.  
+- **Economic (household level)** – income diversification, livelihood strategies.
+
+---
+
+### *Infrastructure / Structural / Physical*
+Hard measures, services, and technology.  
+Includes:  
+- **Engineered and built environment** – seawalls, dams, drainage, resilient transport.  
+- **Services** – service delivery platforms like social protection, healthcare.  
+- **Supply-chain improvement** – logistics, storage, market access.  
+- **Technological** – precision agriculture, IoT, improved breeds/varieties, renewable energy.
+
 
 
 
@@ -2220,16 +2257,6 @@ DT::datatable(
 ```{r,echo=FALSE}
 adaptdata<-read.csv("adaptadata_action_type_nano6.csv")
 
-# ---- Fix: set missing InterventionType_GPT to "economic" if Element == "Action" ----
-adaptdata$InterventionType_GPT <- ifelse(
-  is.na(adaptdata$InterventionType_GPT) & 
-    grepl("^\\s*action\\s*$", adaptdata$Element, ignore.case = TRUE),
-  "economic",
-  adaptdata$InterventionType_GPT
-)
-
-
-
 # ---- Quick check --
 
 # ---- Canonical Action Type Mapping ----
@@ -2343,6 +2370,22 @@ region_key <- overview %>%
   select(Country, Region) %>%
   distinct()
 
+# add manual fixes for missing countries
+manual_add <- tibble::tribble(
+  ~Country,        ~Region,
+  "Moldova",       "Eastern Europe",
+  "Phillipines",   "Asia-Pacific",
+  "Russia",        "Eastern Europe",
+  "Türkiye",       "Asia-Pacific",
+  "USA",           "Western Europe and Other states"
+)
+
+# combine with existing region_key
+region_key <- region_key %>%
+  bind_rows(manual_add) %>%
+  distinct()
+
+
 adaptdata_with_region <- adaptdata %>%
   left_join(region_key, by = "Country")
 
@@ -2438,6 +2481,22 @@ by regions
 region_key <- overview %>%
   select(Country, Region) %>%
   distinct()
+
+# add manual fixes for missing countries
+manual_add <- tibble::tribble(
+  ~Country,        ~Region,
+  "Moldova",       "Eastern Europe",
+  "Phillipines",   "Asia-Pacific",
+  "Russia",        "Eastern Europe",
+  "Türkiye",       "Asia-Pacific",
+  "USA",           "Western Europe and Other states"
+)
+
+# combine with existing region_key
+region_key <- region_key %>%
+  bind_rows(manual_add) %>%
+  distinct()
+
 
 adaptdata_with_region <- adaptdata %>%
   left_join(region_key, by = "Country")
@@ -2670,6 +2729,13 @@ Action Level classification
 adaptdata<-read.csv("adaptdata_action_level_nano6.csv")
 
 
+# ---- Fix: set missing InterventionType_GPT to "economic" if Element == "Action" ----
+adaptdata$InterventionType_GPT <- ifelse(
+  is.na(adaptdata$InterventionType_GPT) & 
+    grepl("^\\s*action\\s*$", adaptdata$Element, ignore.case = TRUE),
+  "economic",
+  adaptdata$InterventionType_GPT
+)
 
 # --- Action Level & Type summaries (counts + DT + plots) --------------------
 suppressPackageStartupMessages({
@@ -2743,8 +2809,24 @@ by regions
 ```{r,echo=FALSE}
 # --- Bring Region onto adaptdata ---
 region_key <- overview %>%
-  dplyr::select(Country, Region) %>%
-  dplyr::distinct()
+  select(Country, Region) %>%
+  distinct()
+
+# add manual fixes for missing countries
+manual_add <- tibble::tribble(
+  ~Country,        ~Region,
+  "Moldova",       "Eastern Europe",
+  "Phillipines",   "Asia-Pacific",
+  "Russia",        "Eastern Europe",
+  "Türkiye",       "Asia-Pacific",
+  "USA",           "Western Europe and Other states"
+)
+
+# combine with existing region_key
+region_key <- region_key %>%
+  bind_rows(manual_add) %>%
+  distinct()
+
 
 adaptdata_with_region <- adaptdata %>%
   dplyr::left_join(region_key, by = "Country") %>%
@@ -3036,8 +3118,24 @@ by regions
 ```{r,echo=FALSE}
 # --- Add Region onto adaptdata ---
 region_key <- overview %>%
-  dplyr::select(Country, Region) %>%
-  dplyr::distinct()
+  select(Country, Region) %>%
+  distinct()
+
+# add manual fixes for missing countries
+manual_add <- tibble::tribble(
+  ~Country,        ~Region,
+  "Moldova",       "Eastern Europe",
+  "Phillipines",   "Asia-Pacific",
+  "Russia",        "Eastern Europe",
+  "Türkiye",       "Asia-Pacific",
+  "USA",           "Western Europe and Other states"
+)
+
+# combine with existing region_key
+region_key <- region_key %>%
+  bind_rows(manual_add) %>%
+  distinct()
+
 
 adaptdata_with_region <- adaptdata %>%
   dplyr::left_join(region_key, by = "Country") %>%
@@ -3483,6 +3581,22 @@ region_key <- overview %>%
   select(Country, Region) %>%
   distinct()
 
+# add manual fixes for missing countries
+manual_add <- tibble::tribble(
+  ~Country,        ~Region,
+  "Moldova",       "Eastern Europe",
+  "Phillipines",   "Asia-Pacific",
+  "Russia",        "Eastern Europe",
+  "Türkiye",       "Asia-Pacific",
+  "USA",           "Western Europe and Other states"
+)
+
+# combine with existing region_key
+region_key <- region_key %>%
+  bind_rows(manual_add) %>%
+  distinct()
+
+
 adaptdata_with_region <- adaptdata %>%
   left_join(region_key, by = "Country")
 
@@ -3550,6 +3664,76 @@ DT::datatable(
   ),
   caption = "📊 Adaptation priorities by UNFCCC region"
 )
+
+```
+
+# Step 8 : Adaptation barriers 
+
+```{r}
+
+
+region_key <- overview %>%
+  select(Country, Region) %>%
+  distinct()
+
+# add manual fixes for missing countries
+manual_add <- tibble::tribble(
+  ~Country,        ~Region,
+  "Moldova",       "Eastern Europe",
+  "Phillipines",   "Asia-Pacific",
+  "Russia",        "Eastern Europe",
+  "Türkiye",       "Asia-Pacific",
+  "USA",           "Western Europe and Other states"
+)
+
+# combine with existing region_key
+region_key <- region_key %>%
+  bind_rows(manual_add) %>%
+  distinct()
+
+
+adaptdata_with_region <- adaptdata %>%
+  left_join(region_key, by = "Country")
+
+# 1) Counts by Region x Priority
+barrier_counts_region <- adaptdata_with_region %>%
+  filter(tolower(Element) == "barriers",
+         !is.na(BarrierType),
+         str_detect(BarrierType, "\\S")) %>%
+  separate_rows(BarrierType, sep = ";") %>%
+  mutate(
+    BarrierType = str_squish(BarrierType),
+    Region = if_else(is.na(Region) | !nzchar(Region), "Unknown", Region)
+  ) %>%
+  filter(BarrierType != "") %>%
+  count(Region, BarrierType, sort = TRUE) %>%
+  rename(`Barrier Type` = BarrierType,
+         Occurrences = n)
+
+# 2) Pick TOP 20 categories by total across regions
+top20 <- barrier_counts_region %>%
+  group_by(`Barrier Type`) %>%
+  summarise(Total = sum(Occurrences), .groups = "drop") %>%
+  slice_max(Total, n = 20, with_ties = FALSE)
+
+barrier_counts_region_top20 <- barrier_counts_region %>%
+  semi_join(top20, by = "Barrier Type") %>%
+  left_join(top20, by = "Barrier Type") %>%
+  mutate(`Barrier Type` = reorder(`Barrier Type`, Total)) %>%
+  arrange(Total)
+
+# 3) Stacked plot by Region (top 20 only)
+barrier_plot_region <- ggplot(barrier_counts_region_top20,
+  aes(x = `Barrier Type`, y = Occurrences, fill = Region)) +
+  geom_col(position = "stack") +
+  coord_flip() +
+  scale_fill_viridis_d(option = "plasma", name = "Region") +
+  labs(title = "Top 20 adaptation barriers by UNFCCC region (stacked)",
+       x = NULL, y = "Occurrences") +
+  theme_minimal(base_size = 10)
+
+barrier_plot_region
+
 
 ```
 
