@@ -1761,6 +1761,8 @@ adaptdata <- adaptdata %>%
   summarise(across(everything(), ~ first(na.omit(.x))), .groups = "drop") %>%
   distinct()
 
+# merge some categories 
+
 # 1. Filter and separate multiple SystemType values
 impact_counts <- adaptdata %>%
   filter(Element == "Climate impact",
@@ -1788,6 +1790,15 @@ impact_counts <- adaptdata %>%
          Occurrences = n)
 
 
+impact_counts <- impact_counts %>%
+  mutate(`Impact Category` = case_when(
+    `Impact Category` %in% c("Human health burden", "Mortality & injury") ~ "Human mortality & morbidity",
+    `Impact Category` %in% c("Water quality deterioration", "Water availability shortfall") ~ "Water availability & quality",
+    TRUE ~ `Impact Category`
+  )) %>%
+  group_by(`Impact Category`) %>%
+  summarise(Occurrences = sum(Occurrences), .groups = "drop") %>%
+  arrange(desc(Occurrences))
 
 
 # 2. Display the interactive table
@@ -3735,6 +3746,82 @@ barrier_plot_region <- ggplot(barrier_counts_region_top20,
 barrier_plot_region
 
 
+
+```
+
+#Step 9 : Summary table for Sankey plot
+
+```{r}
+adaptdata<-read.csv("adaptdata_action_level_nano6.csv")
+
+# ----------------------------
+# 1) Pick your source data
+# ----------------------------
+# Replace `df` with your actual data frame (e.g., df <- check or df <- adaptdata)
+df <- adaptdata   # or: df <- adaptdata
+
+# ----------------------------
+# 2) Normalize key columns
+#    GGA theme, Action level, Action type
+# ----------------------------
+actions <- df %>%
+  filter(tolower(Element) == "action") %>%
+  mutate(
+    GGA          = str_squish(SectorType_GGA),
+    ActionLevel  = str_squish(coalesce(ActionLevel_GPT, Action.level)),
+    # Choose which "type" you want to show in the Sankey’s last column:
+    #   - ActionType_GPT (your action-type buckets), or
+    #   - InterventionType_GPT (your intervention-type buckets)
+    ActionType   = str_squish(coalesce(ActionType_GPT, InterventionType_GPT))
+  ) %>%
+  # keep only rows that have at least GGA and ActionLevel
+  filter(!is.na(GGA), GGA != "",
+         !is.na(ActionLevel), ActionLevel != "")
+
+# split multiple ActionTypes (e.g., "economic; institutional")
+actions_long <- actions %>%
+  separate_rows(ActionType, sep = ";|,") %>%
+  mutate(ActionType = str_squish(ActionType)) %>%
+  filter(!is.na(ActionType), ActionType != "")
+
+# ----------------------------
+# 3) Count linkages for the Sankey
+# ----------------------------
+# (a) GGA -> ActionLevel
+edges_gga_level <- actions %>%
+  count(source = GGA, target = ActionLevel, name = "value", sort = TRUE) %>%
+  mutate(stage = "GGA→ActionLevel")
+
+# (b) ActionLevel -> ActionType
+edges_level_type <- actions_long %>%
+  count(source = ActionLevel, target = ActionType, name = "value", sort = TRUE) %>%
+  mutate(stage = "ActionLevel→ActionType")
+
+# Combine into one edge list
+sankey_edges <- bind_rows(edges_gga_level, edges_level_type)
+
+# ----------------------------
+# 4) (Optional) Triple counts
+#     GGA x ActionLevel x ActionType — useful for QA or other visuals
+# ----------------------------
+triples <- actions_long %>%
+  count(GGA, ActionLevel, ActionType, name = "value", sort = TRUE)
+
+# ----------------------------
+# 5) (Optional) Nodes table (for tools that want nodes + edges)
+# ----------------------------
+nodes <- sankey_edges %>%
+  select(source) %>% rename(node = source) %>%
+  bind_rows(sankey_edges %>% select(target) %>% rename(node = target)) %>%
+  distinct() %>%
+  arrange(node) %>%
+  mutate(id = row_number() - 1L)  # 0-based IDs
+
+# ----------------------------
+# 6) Export for Sankey tools / SankeyMATIC
+# ----------------------------
+write_csv(sankey_edges, "sankey_edges_gga_level_type.csv")
+write_csv(triples,     "sankey_triples_gga_level_type.csv")
 
 ```
 
