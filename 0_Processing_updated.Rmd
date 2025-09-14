@@ -1836,69 +1836,93 @@ system_plot
 by regions 
 
 ```{r,echo=FALSE}
+library(dplyr)
+library(stringr)
+library(tidyr)
+library(readr)
+library(DT)
+library(ggplot2)
 
+# ---- Region key (with manual fixes) ----
 region_key <- overview %>%
   select(Country, Region) %>%
   distinct()
 
-# add manual fixes for missing countries
 manual_add <- tibble::tribble(
-  ~Country,        ~Region,
-  "Moldova",       "Eastern Europe",
-  "Phillipines",   "Asia-Pacific",
-  "Russia",        "Eastern Europe",
-  "Türkiye",       "Asia-Pacific",
-  "USA",           "Western Europe and Other states"
+  ~Country,      ~Region,
+  "Moldova",     "Eastern Europe",
+  "Phillipines", "Asia-Pacific",   # (kept your spelling)
+  "Russia",      "Eastern Europe",
+  "Türkiye",     "Asia-Pacific",
+  "USA",         "Western Europe and Other states"
 )
 
-# combine with existing region_key
 region_key <- region_key %>%
   bind_rows(manual_add) %>%
   distinct()
 
 adaptdata_with_region <- adaptdata %>%
   left_join(region_key, by = "Country")
-# 1. Filter and count as before
+
+# ---- Normalizer to merge/fix impact categories ----
+normalize_impact_cat <- function(x) {
+  lx <- tolower(str_squish(x))
+
+  dplyr::case_when(
+    # MERGES
+    lx %in% c("human health burden", "mortality & injury", "humna health burden") ~ "Human mortality & morbidity",
+    lx %in% c("water quality deterioration", "water availability shortfall")       ~ "Water availability & quality",
+
+    # COMMON TYPOS / CANONICALIZATION
+    lx == "economic & livelihood losse"                   ~ "Economic & livelihood losses",
+    lx == "livestock imapcts"                             ~ "Livestock impacts",
+    lx == "tourism & recreation imapcts"                  ~ "Tourism & recreation impacts",
+    lx == "damage to buildings and infrastructure"        ~ "Damage to buildings & infrastructure",
+    lx == "energy systems impacts"                        ~ "Energy system impacts",
+
+    # Otherwise keep original (title-ish)
+    TRUE ~ str_replace_all(str_to_title(lx),
+                           c("\\bAnd\\b"="&",    # small touch to keep your styling
+                             " & " = " & "))
+  )
+}
+
+# ---- 1) Filter, split, clean, MERGE, then count by Region ----
 impact_counts <- adaptdata_with_region %>%
   filter(Element == "Climate impact",
          !is.na(ImpactCategories),
          str_detect(ImpactCategories, "\\S")) %>%
-  separate_rows(ImpactCategories, sep = ";") %>%
+  separate_rows(ImpactCategories, sep = ";|,") %>%   # split on ; or ,
   mutate(
-    ImpactCategories = str_replace_all(ImpactCategories, "\\p{Zs}+", " "),
-    ImpactCategories = str_squish(ImpactCategories)
+    ImpactCategories = str_squish(str_replace_all(ImpactCategories, "\\p{Zs}+", " ")),
+    `Impact Category` = normalize_impact_cat(ImpactCategories)
   ) %>%
-  filter(ImpactCategories != "") %>%
-  count(Region, ImpactCategories, sort = TRUE) %>%
-  rename(`Impact Category` = ImpactCategories,
-         Occurrences = n)
+  filter(`Impact Category` != "", !is.na(`Impact Category`)) %>%
+  count(Region, `Impact Category`, sort = TRUE) %>%
+  rename(Occurrences = n)
 
-# 2. Identify the top 15 categories overall
+# ---- 2) Top 15 categories overall (after merge) ----
 top15_categories <- impact_counts %>%
   group_by(`Impact Category`) %>%
   summarise(total = sum(Occurrences), .groups = "drop") %>%
   slice_max(order_by = total, n = 15) %>%
   pull(`Impact Category`)
 
-# 3. Keep only those categories for plotting
+# ---- 3) Keep only those for plotting/table ----
 impact_top15 <- impact_counts %>%
   filter(`Impact Category` %in% top15_categories)
 
-# 4. Interactive table (top 15 by region)
+# ---- 4) Interactive table ----
 DT::datatable(
   impact_top15,
   rownames = FALSE,
-  options = list(
-    pageLength = 15,
-    autoWidth = TRUE,
-    dom = 'tip'
-  )
+  options = list(pageLength = 15, autoWidth = TRUE, dom = 'tip')
 )
 
-# Optional: save
-write.csv(impact_top15, "impact_top15_by_region.csv", row.names = FALSE)
+# Optional save
+write.csv(impact_top15, "impact_top15_by_region_merged.csv", row.names = FALSE)
 
-# 5. Plot stacked bars (regions as colors)
+# ---- 5) Plot: stacked bars (regions as colors), ordered by total ----
 impact_plot <- ggplot(impact_top15,
        aes(x = reorder(`Impact Category`, Occurrences, FUN = sum),
            y = Occurrences,
@@ -1906,7 +1930,7 @@ impact_plot <- ggplot(impact_top15,
   geom_col(position = "stack") +
   coord_flip() +
   scale_fill_viridis_d(option = "plasma") +
-  labs(title = "Top 15 Climate impacts by UNFCCC region",
+  labs(title = "Top 15 Climate impacts by UNFCCC region (merged categories)",
        x = NULL, y = "Occurrences", fill = "Region") +
   theme_minimal(base_size = 10) +
   theme(
@@ -1915,6 +1939,7 @@ impact_plot <- ggplot(impact_top15,
   )
 
 impact_plot
+
 
 ```
 
