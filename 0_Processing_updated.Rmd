@@ -3735,6 +3735,7 @@ barrier_plot_region <- ggplot(barrier_counts_region_top20,
 barrier_plot_region
 
 
+
 ```
 
 # link to overview
