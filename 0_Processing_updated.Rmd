@@ -3004,76 +3004,78 @@ DT::datatable(
 
 **Goal.** Label each *Result* as one of four types so we can compare what’s being reported across countries and sectors.
 
-**Types (choose one)**  
-- **Input** — resources to implement actions (funding, staff, tools, data, analyses, maps).  
-- **Process** — planning/governance steps (plans, strategies, frameworks, integration into policy).  
-- **Output** — immediate deliverables (things built/distributed, trainings, coverage/area).  
-- **Outcome** — condition/performance changes (yields, resilience, wellbeing, recovery).
-
 **Method**  
 - GPT reads the *Result* text and returns **exactly one label** from the list above (or `NA` if unclear).  
 - We **store the model’s reply verbatim** in `ResultType_GPT` (no normalization here); any cleanup or remapping happens later.
 
 
 ```{r,echo=FALSE,}
-
-# adaptdata <- read_csv("adaptadata_action_type_nano6.csv")
-# 
+## ========= Load data =========
+# adaptdata <- readr::read_csv("data/adaptdata_action_level_nano6.csv")
 # 
 # suppressPackageStartupMessages({
 #   library(dplyr); library(stringr); library(glue); library(DT); library(ellmer)
 # })
 # 
-# # ---- API key (same as before) ----
+# # ========= API key =========
 # btr_key <- Sys.getenv("BTR_KEY")
 # stopifnot("BTR_KEY is not set in your environment." = nzchar(btr_key))
 # Sys.setenv(OPENAI_API_KEY = btr_key)
 # 
-# # ---- Model / batching ----
+# # ========= Model / batching =========
 # RESULT_MODEL <- "gpt-5-nano"
 # CHUNK_SIZE   <- 30
+# ALLOWED_LEVELS <- c("Output","Outcome","Impact")
 # 
-# # ---- Batch prompt (same content as your single-item prompt) ----
+# # Optional safety: canonicalize any slight variations to the exact labels
+# canonicalize_result_label <- function(x) {
+#   raw <- tolower(trimws(x))
+#   raw <- gsub("[[:punct:]]+$", "", raw)
+#   raw <- gsub("\\s+", " ", raw)
+#   if (raw %in% c("output","outputs"))  return("Output")
+#   if (raw %in% c("outcome","outcomes"))return("Outcome")
+#   if (raw %in% c("impact","impacts"))  return("Impact")
+#   # final fallback (no NA allowed)
+#   "Output"
+# }
+# 
+# # ========= Batch prompt: NEW protocol =========
 # make_result_batch_prompt <- function(txts) {
 #   glue::glue(
-# "Classify each passage by the *type of results* it reports. Choose EXACTLY ONE label per passage.
-# Return N lines, one per input, in the same order. Output only the label string.
+# "Classify each passage by the single *result type* it reports.
+# Choose EXACTLY ONE label per passage. Return N lines in the same order.
+# Output only the label text (no punctuation).
 # 
-# Allowed labels (use these exact words only):
-# - Input — resources needed to implement an adaptation action (e.g., finance amounts; staff counts; tools/data/analyses/maps prepared).
-# - Process — progress in designing/implementing adaptation policy processes (e.g., integrating climate action into policies/strategies; steps to formulate, implement, publish, and update programmes, strategies, measures, frameworks).
-# - Output — immediate products/services delivered, not changes in baseline (e.g., trees planted; improved cookstoves installed; seed varieties disseminated; area covered; # beneficiaries/adopters; people trained). “Area reforested” is an Output if it is the direct result of a reforestation activity.
-# - Outcome — intermediate effects including behavior change and condition/uptake changes (e.g., improved knowledge; increased adoption rates of adaptive technologies/practices; migration/relocation uptake; coverage/uptake indicators when they reflect change in condition).
-# - Impact — ultimate effects relative to climate risks showing adequacy/effectiveness of measures (e.g., agricultural productivity improvements; water use efficiency; livelihoods/wellbeing; food security; recovery after extreme events).
+# Allowed labels (use these exact words only): Output | Outcome | Impact
 # 
-# Disambiguation (apply in order):
-# 1) If multiple levels are present, choose the HIGHEST level mentioned: Impact > Outcome > Output > Process > Input.
-# 2) Coverage/uptake:
-#    - If it’s a delivered count/area (# trained, area covered, items distributed) → Output.
-#    - If it’s a change in condition/behavior (knowledge improved, adoption rate increased, migration occurred) → Outcome.
-# 3) Resources vs steps vs products:
-#    - Resources allocated/prepared → Input.
-#    - Policies/strategies/frameworks/steps/plan adoption → Process.
-#    - Tangible products/services delivered → Output.
-# 4) If none fit, return 'NA'.
+# DEFINITIONS
+# - Output — Relates to immediate results from the implementation of activities, without assessing if these results lead to changes in the baseline condition. This includes references to products or services developed or disseminated, adopted policies, trees planted, improved cookstoves installed; seed varieties disseminated,promotion of practices without mentionning adoption etc.; coverage (area) of the activity or the output; beneficiaries or adopters of the activity or the product, including beneficiaries or adopters of an improved technology, individuals trained, etc. results capturing amount of finance mobilized or mobilized as well as data and assessments are considered outputs. 
+#   system/platform/center established/launched; **finance mobilized/allocated/spent**; **risk analyses/maps/datasets/
+#   baselines/assessments produced**. (Finance & data/assessments are Outputs.)
+# - Outcome — intermediate CHANGES in behavior or condition:
+#   knowledge improved; adoption/uptake increased; access/coverage increased as a change from baseline; migration/relocation occurred;
+#   service reliability improved; preparedness or capacity *improved* (as a change).
+# - Impact —Relates to the ultimate effect of adaptation measures in relation to climate risks, indicating the level of adequacy and effectiveness of those measures in enhancing resilience and adaptive capacities and reducing vulnerability. Examples of these types of results might include agricultural productivity improvements, water use efficiency rates, livelihoods and wellbeing scores, food security rates, farmers recovering from extreme events, etc.
+# Relative to climate risks,improve resilience (adequacy/effectiveness):
+#   yields/productivity up or losses down; water-use efficiency rate improved;water quality; food security/livelihoods/wellbeing improved;
+#   resilience ↑ / vulnerability ↓; mortality/morbidity ↓; recovery after extremes;strenghtening resilience; **better response to a hazard** (e.g., reduced damages/fatalities from floods due to the measure/linked to resilience).
 # 
-# Examples:
-# - “USD 2M allocated; hazard maps produced” → Input
-# - “NAP approved; climate action integrated into sector plans” → Process
-# - “10,000 stoves installed; 2,000 ha reforested; 500 farmers trained” → Output
-# - “Adoption of drought-tolerant seeds rose from 15% to 40%; participants’ knowledge improved” → Outcome
-# - “Maize yields +12%; household food security improved; farmers recovered after floods” → Impact
+# 
+# EDGE CASES / HARD NEGATIVES
+# - “risk/hazard maps produced”, “baseline/assessment/feasibility/inventory compiled”, “guidelines/manual drafted” → Output (NOT Outcome).
+# - Counts without change (e.g., “10,000 stoves installed”, “2,000 ha reforested”, “22 schemes built”, “500 trained”) → Output.
+# - Policy/plan “adopted/approved/issued/distribution”, or platform “established/launched” → Output (unless a measured change is stated → Outcome).
+# - “lead time improved”, “false alarms reduced”, “fewer deaths/injuries/damages in floods”,river connectivity,adaptative capcity of women → Impact (better hazard response).
 # 
 # Output format:
-# - Return ONLY one of: Input | Process | Output | Outcome | Impact | NA
-# - No extra words or punctuation.
+# Return ONLY one of: Output | Outcome | Impact
 # 
 # INPUTS (numbered):
 # {paste0(sprintf('%d) %s', seq_along(txts), txts), collapse = '\n')}"
 #   )
 # }
 # 
-# # ---- Batch classifier (stores VERBATIM labels) ----
+# # ========= Batch classifier (no NA; fallback = Output) =========
 # classify_result_type_batch <- function(txts, model = RESULT_MODEL, chunk_size = CHUNK_SIZE) {
 #   if (!length(txts)) return(character(0))
 #   chat <- ellmer::chat_openai(model = model)
@@ -3091,33 +3093,31 @@ DT::datatable(
 # 
 #     ans <- tryCatch(chat$chat(prompt), error = function(e) e)
 #     if (inherits(ans, "error")) {
-#       warning("GPT batch failed: ", conditionMessage(ans), " — assigning NA for this chunk.")
-#       out[ids] <- NA_character_
+#       warning("GPT batch failed: ", conditionMessage(ans), " — assigning 'Output' for this chunk.")
+#       out[ids] <- "Output"
 #       setTxtProgressBar(pb, i); next
 #     }
 # 
-#     # one label per line; strip accidental numbering; keep label text VERBATIM
 #     lines <- strsplit(ans, "\\r?\\n", perl = TRUE)[[1]]
 #     lines <- trimws(lines)
 #     lines <- lines[nzchar(lines)]
 #     lines <- sub("^[0-9]+[.)\\-:]\\s*", "", lines, perl = TRUE)
 # 
-#     # align to input size
-#     if (length(lines) < length(ids)) lines <- c(lines, rep(NA_character_, length(ids) - length(lines)))
+#     if (length(lines) < length(ids)) lines <- c(lines, rep("Output", length(ids) - length(lines)))
 #     if (length(lines) > length(ids)) lines <- lines[seq_along(ids)]
 # 
-#     out[ids] <- lines
+#     out[ids] <- vapply(lines, canonicalize_result_label, character(1))
 #     setTxtProgressBar(pb, i)
 #   }
 #   out
 # }
 # 
-# # ---- Run on Element == "Result" (batched) ----
+# # ========= Run on Element == 'Result' =========
 # if (!"ResultType_GPT" %in% names(adaptdata)) adaptdata$ResultType_GPT <- NA_character_
 # 
 # res_idx <- which(grepl("^\\s*result\\s*$", adaptdata$Element, ignore.case = TRUE))
 # if (length(res_idx)) {
-#   cat("Classifying result type for", length(res_idx), "rows (batched)...\n")
+#   cat("Classifying result type for", length(res_idx), "rows (batched, new protocol)...\n")
 #   adaptdata$ResultType_GPT[res_idx] <-
 #     classify_result_type_batch(adaptdata$ElementText[res_idx],
 #                                model = RESULT_MODEL,
@@ -3126,32 +3126,61 @@ DT::datatable(
 #   cat("No rows with Element == 'Result' found.\n")
 # }
 # 
-# # ---- Preview (verbatim) + export ----
+# # Factor for plotting (ordered)
+# adaptdata$ResultType_GPT <- factor(adaptdata$ResultType_GPT,
+#                                    levels = ALLOWED_LEVELS,
+#                                    ordered = TRUE)
+# 
+# # ========= Preview + export =========
 # result_preview <- adaptdata %>%
 #   filter(grepl("^\\s*result\\s*$", Element, ignore.case = TRUE)) %>%
 #   transmute(
 #     Country, Document,
 #     ElementText = ifelse(is.na(ElementText), "",
-#                          ifelse(nchar(ElementText) > 120,
-#                                 paste0("<span title='", ElementText, "'>", substr(ElementText, 1, 120), "...</span>"),
+#                          ifelse(nchar(ElementText) > 140,
+#                                 paste0("<span title='", ElementText, "'>", substr(ElementText, 1, 140), "...</span>"),
 #                                 ElementText)),
 #     ResultType_GPT
 #   )
 # 
 # DT::datatable(
 #   result_preview, escape = FALSE,
-#   caption = "🧪 Result type — GPT (batched; verbatim labels)",
+#   caption = "🧪 Result type — GPT (batched; NEW protocol: Output | Outcome | Impact)",
 #   options = list(pageLength = 10, autoWidth = TRUE, dom = "tip")
 # )
 # 
-# # Save side-by-side comparison for QA
-# write.csv(adaptdata, "adaptdata_results_nano6", row.names = FALSE)
-
-
+# # Save full dataset
+# write.csv(adaptdata, "data/adaptdata_results_nano6.csv", row.names = FALSE)
+# 
 
 ```
 
 
+```{r,echo=FALSE,}
+# Copy data to avoid overwriting
+# a2 <- a %>%
+#   mutate(
+#     # normalize: treat all Inputs as Outputs
+#     ResultType_manual_norm = if_else(tolower(ResultType) == "input", "Output", ResultType)
+#   )
+# 
+# # Compare GPT vs normalized manual
+# a2$match <- tolower(a2$ResultType_GPT) == tolower(a2$ResultType_manual_norm)
+# 
+# # Agreement score
+# agreement <- mean(a2$match, na.rm = TRUE)
+# 
+# # Confusion matrix
+# confusion <- a2 %>%
+#   count(
+#     Manual = ResultType_manual_norm,
+#     GPT = ResultType_GPT
+#   )
+# 
+# list(agreement = agreement, confusion = confusion)
+
+
+```
 
 
 
@@ -3160,7 +3189,8 @@ DT::datatable(
 # --- Results: simple bar chart (Input / Process / Output / Outcome) ---
 adaptdata<-read.csv("data/adaptdata_results_nano6.csv")
 
-RESULT_LABELS <- c("Input","Output","Outcome","Impact")
+RESULT_LABELS <- c("Output","Outcome","Impact")
+
 
 
 result_counts <- adaptdata %>%
@@ -3258,7 +3288,7 @@ adaptdata_with_region <- adaptdata %>%
   dplyr::left_join(region_key, by = "Country") %>%
   dplyr::mutate(Region = dplyr::coalesce(Region, "Unknown"))
 
-RESULT_LABELS <- c("Input","Process","Output","Outcome","Impact")
+RESULT_LABELS <- c("Output","Outcome","Impact")
 
 
 # --- Canonicalize + count by Region x Result type ---
@@ -3807,68 +3837,302 @@ DT::datatable(
 
 # Step 8 : Adaptation barriers 
 
+
+```{r}
+# ---------------- Setup ----------------
+# suppressPackageStartupMessages({
+#   library(dplyr); library(stringr); library(glue); library(DT); library(ellmer); library(tidyr)
+# })
+# 
+# # Model + batching
+# BARRIER_MODEL <- "gpt-5-nano"
+# CHUNK_SIZE    <- 30
+# MAX_LABELS_PER_PASSAGE <- 3
+# 
+# # ---- API key ----
+# btr_key <- Sys.getenv("BTR_KEY")
+# stopifnot("BTR_KEY is not set in your environment." = nzchar(btr_key))
+# Sys.setenv(OPENAI_API_KEY = btr_key)
+# 
+# # ---------------- Canonical labels ----------------
+# BARRIER_LABELS <- c(
+#   "Financial",
+#   "Economic",
+#   "Human capacities",
+#   "Informational",
+#   "Institutional",
+#   "Organizational",
+#   "Technological",
+#   "Physical",
+#   "Social/ cultural",
+#   "Biological",
+#   "Other emerging issues"
+# )
+# 
+# # Map small variants to the exact allowed strings (extra safety)
+# canonicalize_barrier_label <- function(x) {
+#   if (is.null(x) || is.na(x)) return("Other emerging issues")
+#   raw <- tolower(trimws(x))
+#   raw <- gsub("[[:punct:]]+$", "", raw)
+#   raw <- gsub("\\s+", " ", raw)
+# 
+#   map <- list(
+#     "financial"            = c("financial","financing","funding","budget","costs"),
+#     "economic"             = c("economic","macro-economic","macroeconomic","market","livelihood"),
+#     "human capacities"     = c("human capacity","human capacities","capacity","capacities","skills","staffing"),
+#     "informational"        = c("informational","information","knowledge","data gaps","monitoring and data","evidence","m&e","monitoring"),
+#     "institutional"        = c("institutional","governance","policy","regulatory","mainstreaming"),
+#     "organizational"       = c("organizational","organisational","coordination","mandates","roles and responsibilities","role clarity"),
+#     "technological"        = c("technological","technology","tech","innovation","digital"),
+#     "physical"             = c("physical","biophysical","infrastructure","geographical","terrain","remoteness"),
+#     "social/ cultural"     = c("social/ cultural","social/cultural","sociocultural","social and cultural","social-cultural","social","cultural"),
+#     "biological"           = c("biological","bio-physical limits","biophysical limits","climatic limits","ecophysiological"),
+#     "other emerging issues"= c("other emerging issues","other","emerging issues","pandemics","covid","invasions","invasion")
+#   )
+#   for (k in names(map)) if (raw %in% map[[k]]) {
+#     return(BARRIER_LABELS[match(tolower(k), tolower(BARRIER_LABELS))])
+#   }
+#   hit <- BARRIER_LABELS[tolower(BARRIER_LABELS) == raw]
+#   if (length(hit)) return(hit)
+#   "Other emerging issues"
+# }
+# 
+# canonicalize_barrier_vector <- function(v) {
+#   v <- v[ nzchar(trimws(v)) ]
+#   if (!length(v)) return("Other emerging issues")
+#   v <- unique(vapply(v, canonicalize_barrier_label, character(1)))
+#   # keep at most MAX_LABELS_PER_PASSAGE
+#   v <- v[seq_len(min(length(v), MAX_LABELS_PER_PASSAGE))]
+#   paste(v, collapse = "; ")
+# }
+# 
+# # ---------------- Multi-label batch prompt ----------------
+# make_barrier_batch_prompt <- function(txts) {
+#   glue::glue(
+# "Task: For each passage, select all applicable *Adaptation barriers* (1–{MAX_LABELS_PER_PASSAGE}) using ONLY the labels below.
+# If uncertain, choose the closest categories (do NOT output NA). Return N lines, same order; separate multiple with '; '.
+# 
+# Allowed labels (exact strings):
+# - Financial — inadequate/lack of funds or budgets; affordability/cost constraints.
+# - Economic — constraints from current livelihoods, market structure, macro-economy, and the development level of key sectors.
+# - Human capacities — gaps in skills/training/education and adequate staffing at individual/organizational/societal levels.
+# - Informational — gaps in information/awareness/knowledge/data/monitoring needed to guide or assess adaptation; ALSO gaps in data infrastructure and knowledge-management systems (platforms, registries, databases, MIS, M&E systems).
+# - Institutional — weaknesses in policies/regulations/plans or inadequate mainstreaming of adaptation into other policies.
+# - Organizational — weak organizations/mandates/coordination/designated entities; poor stakeholder inclusion/participation.
+# - Technological — limited access to technologies/innovation/equipment, INCLUDING limitations of manmade/built infrastructure.
+# - Physical — barriers from the natural physical environment (terrain, remoteness, topography, soils, floodplains, coastlines).
+# - Social/ cultural — norms, values, identity, beliefs, place attachment, justice/equity, social support, security issues.
+# - Biological — biophysical/climatic/physiological limits (extreme temperature/precipitation/salinity/acidity/extreme-event frequency).
+# - Other emerging issues — contextual shocks (e.g., pandemics, invasions).
+# 
+# Disambiguation (key cues):
+# - Data/knowledge/M&E platforms/registries/databases → Informational (not Institutional).
+# - Coordination/mandates/role clarity/designated entities → Organizational.
+# - Manmade/built infrastructure constraints → Technological (Physical is ONLY natural environment).
+# - Budget/funding/affordability → Financial; broader livelihoods/markets/macroeconomy → Economic.
+# 
+# Output format: EXACT label strings separated by '; ' (max {MAX_LABELS_PER_PASSAGE}). No extra words.
+# 
+# INPUTS (numbered):
+# {paste0(sprintf('%d) %s', seq_along(txts), txts), collapse = '\n')}"
+#   )
+# }
+# 
+# # ---------------- Batch classifier (multi-label) ----------------
+# classify_barrier_type_batch <- function(txts, model = BARRIER_MODEL, chunk_size = CHUNK_SIZE) {
+#   if (!length(txts)) return(character(0))
+#   chat <- ellmer::chat_openai(model = model)
+#   out  <- vector("character", length(txts))
+# 
+#   idx    <- seq_along(txts)
+#   chunks <- split(idx, ceiling(idx / chunk_size))
+# 
+#   pb <- txtProgressBar(min = 0, max = length(chunks), style = 3)
+#   on.exit(close(pb), add = TRUE)
+# 
+#   for (i in seq_along(chunks)) {
+#     ids    <- chunks[[i]]
+#     prompt <- make_barrier_batch_prompt(txts[ids])
+# 
+#     ans <- tryCatch(chat$chat(prompt), error = function(e) e)
+#     if (inherits(ans, "error")) {
+#       warning("GPT batch failed: ", conditionMessage(ans), " — defaulting to 'Other emerging issues' for this chunk.")
+#       out[ids] <- "Other emerging issues"
+#       setTxtProgressBar(pb, i); next
+#     }
+# 
+#     lines <- strsplit(ans, "\\r?\\n", perl = TRUE)[[1]]
+#     lines <- trimws(lines)
+#     lines <- lines[nzchar(lines)]
+#     lines <- sub("^[0-9]+[.)\\-:]\\s*", "", lines, perl = TRUE)
+# 
+#     # align to input size
+#     if (length(lines) < length(ids)) lines <- c(lines, rep("Other emerging issues", length(ids) - length(lines)))
+#     if (length(lines) > length(ids)) lines <- lines[seq_along(ids)]
+# 
+#     # split by ';', canonicalize each, cap to MAX_LABELS_PER_PASSAGE, then collapse back
+#     out[ids] <- vapply(lines, function(s) {
+#       labs <- unlist(strsplit(s, "\\s*;\\s*", perl = TRUE))
+#       canonicalize_barrier_vector(labs)
+#     }, character(1))
+# 
+#     setTxtProgressBar(pb, i)
+#   }
+#   out
+# }
+# 
+# # ---------------- Run on your data ----------------
+# if (!"BarrierType_GPT" %in% names(adaptdata)) adaptdata$BarrierType_GPT <- NA_character_
+# 
+# bar_idx <- which(
+#   grepl("barrier", adaptdata$Element, ignore.case = TRUE) |
+#   grepl("barrier", adaptdata$ElementLabel, ignore.case = TRUE)
+# )
+# 
+# if (length(bar_idx)) {
+#   cat("Classifying adaptation barriers for", length(bar_idx), "rows (multi-label, batched)...\n")
+#   adaptdata$BarrierType_GPT[bar_idx] <-
+#     classify_barrier_type_batch(adaptdata$ElementText[bar_idx],
+#                                 model = BARRIER_MODEL,
+#                                 chunk_size = CHUNK_SIZE)
+# } else {
+#   cat("No rows with Element/ElementLabel containing 'barrier' found.\n")
+# }
+
+#write.csv(adaptdata,"data/adaptdata_barriers.csv")
+ # ---------------- Explode to row-per-barrier (to mirror manual duplication) ----------------
+# adaptdata_barriers_long <- adaptdata %>%
+#   filter(row_number() %in% bar_idx) %>%
+#   mutate(BarrierType_GPT = ifelse(is.na(BarrierType_GPT) | !nzchar(BarrierType_GPT),
+#                                   "Other emerging issues", BarrierType_GPT)) %>%
+#   separate_rows(BarrierType_GPT, sep = "\\s*;\\s*")
+# 
+# # Quick preview
+# DT::datatable(
+#   adaptdata_barriers_long %>%
+#     select(Country, Document, Element, ElementLabel, ElementText, BarrierType_GPT),
+#   escape = FALSE,
+#   caption = "🚧 Adaptation barriers — GPT (exploded to one row per barrier)",
+#   options = list(pageLength = 10, autoWidth = TRUE, dom = "tip")
+# )
+# 
+# # Optional: counts
+# barrier_counts <- adaptdata_barriers_long %>%
+#   count(BarrierType_GPT, sort = TRUE)
+# print(barrier_counts)
+# 
+# # Optional save
+# # write.csv(adaptdata_barriers_long, "data/adaptdata_barriers_long_nano6.csv", row.names = FALSE)
+# 
+# # ---------------- Helper: agreement vs manual after dedup ----------------
+# # Expects a data.frame `a` with columns: Element, ElementText, BarrierType (manual), BarrierType_GPT (semicolon string or exploded)
+# 
+# a<-adaptdata_barriers_long%>%select(Element,ElementText,BarrierType,BarrierType_GPT)
+# 
+# compare_barrier_agreement <- function(a) {
+#   # Explode GPT side if needed
+#   a_exp <- a %>%
+#     mutate(BarrierType_GPT = ifelse(is.na(BarrierType_GPT), "", BarrierType_GPT)) %>%
+#     separate_rows(BarrierType_GPT, sep = "\\s*;\\s*")
+# 
+#   # Deduplicate manual rows: one row per (Element, ElementText, BarrierType)
+#   a_dedup <- a_exp %>%
+#     group_by(Element, ElementText, BarrierType) %>%
+#     summarise(BarrierType_GPT = first(BarrierType_GPT), .groups = "drop") %>%
+#     mutate(
+#       BarrierType_norm    = tolower(trimws(BarrierType)),
+#       BarrierType_GPT_norm= tolower(trimws(BarrierType_GPT)),
+#       match = BarrierType_norm == BarrierType_GPT_norm
+#     )
+# 
+#   agreement <- mean(a_dedup$match, na.rm = TRUE)
+# 
+#   confusion <- a_dedup %>%
+#     count(Manual = BarrierType, GPT = BarrierType_GPT) %>%
+#     arrange(desc(n))
+# 
+#   list(agreement = agreement, confusion = confusion, n = nrow(a_dedup))
+# }
+# 
+# ```
+# 
+# ```{r}
+# a_dedup <- a %>%
+#   group_by(Element, ElementText, BarrierType) %>%
+#   summarise(BarrierType_GPT = first(BarrierType_GPT), .groups = "drop")
+# 
+# # 2. Compare manual vs GPT
+# a_dedup <- a_dedup %>%
+#   mutate(match = tolower(trimws(BarrierType)) == tolower(trimws(BarrierType_GPT)))
+# 
+# # 3. Agreement rate
+# agreement <- mean(a_dedup$match, na.rm = TRUE)
+```
+
+
 ```{r}
 
-
+adaptdata<-read.csv("data/adaptdata_barriers.csv")
+# Build region key (+ manual fixes)
 region_key <- overview %>%
-  select(Country, Region) %>%
-  distinct()
+  dplyr::select(Country, Region) %>%
+  dplyr::distinct()
 
-# add manual fixes for missing countries
 manual_add <- tibble::tribble(
-  ~Country,        ~Region,
-  "Moldova",       "Eastern Europe",
-  "Phillipines",   "Asia-Pacific",
-  "Russia",        "Eastern Europe",
-  "Türkiye",       "Asia-Pacific",
-  "USA",           "Western Europe and Other states"
+  ~Country,      ~Region,
+  "Moldova",     "Eastern Europe",
+  "Phillipines", "Asia-Pacific",
+  "Russia",      "Eastern Europe",
+  "Türkiye",     "Asia-Pacific",
+  "USA",         "Western Europe and Other states"
 )
 
-# combine with existing region_key
 region_key <- region_key %>%
-  bind_rows(manual_add) %>%
-  distinct()
+  dplyr::bind_rows(manual_add) %>%
+  dplyr::distinct()
 
-
+# Join regions
 adaptdata_with_region <- adaptdata %>%
-  left_join(region_key, by = "Country")
+  dplyr::left_join(region_key, by = "Country")
 
-# 1) Counts by Region x Priority
+# 1) Counts by Region x Barrier (using BarrierType_GPT; split on ';')
 barrier_counts_region <- adaptdata_with_region %>%
-  filter(tolower(Element) == "barriers",
-         !is.na(BarrierType),
-         str_detect(BarrierType, "\\S")) %>%
-  separate_rows(BarrierType, sep = ";") %>%
-  mutate(
-    BarrierType = str_squish(BarrierType),
-    Region = if_else(is.na(Region) | !nzchar(Region), "Unknown", Region)
+  dplyr::filter(stringr::str_to_lower(Element) == "barriers",
+                !is.na(BarrierType_GPT),
+                stringr::str_detect(BarrierType_GPT, "\\S")) %>%
+  tidyr::separate_rows(BarrierType_GPT, sep = "\\s*;\\s*") %>%   # split multi-label cells
+  dplyr::mutate(
+    BarrierType_GPT = stringr::str_squish(BarrierType_GPT),
+    Region = dplyr::if_else(is.na(Region) | !nzchar(Region), "Unknown", Region)
   ) %>%
-  filter(BarrierType != "") %>%
-  count(Region, BarrierType, sort = TRUE) %>%
-  rename(`Barrier Type` = BarrierType,
-         Occurrences = n)
+  dplyr::filter(BarrierType_GPT != "") %>%
+  # avoid counting duplicate barrier labels for identical passages
+  dplyr::distinct(Country, Document, Element, ElementLabel, ElementText, Region, BarrierType_GPT) %>%
+  dplyr::count(Region, BarrierType_GPT, sort = TRUE) %>%
+  dplyr::rename(`Barrier Type` = BarrierType_GPT,
+                Occurrences = n)
 
 # 2) Pick TOP 20 categories by total across regions
 top20 <- barrier_counts_region %>%
-  group_by(`Barrier Type`) %>%
-  summarise(Total = sum(Occurrences), .groups = "drop") %>%
-  slice_max(Total, n = 20, with_ties = FALSE)
+  dplyr::group_by(`Barrier Type`) %>%
+  dplyr::summarise(Total = sum(Occurrences), .groups = "drop") %>%
+  dplyr::slice_max(Total, n = 20, with_ties = FALSE)
 
 barrier_counts_region_top20 <- barrier_counts_region %>%
-  semi_join(top20, by = "Barrier Type") %>%
-  left_join(top20, by = "Barrier Type") %>%
-  mutate(`Barrier Type` = reorder(`Barrier Type`, Total)) %>%
-  arrange(Total)
+  dplyr::semi_join(top20, by = "Barrier Type") %>%
+  dplyr::left_join(top20, by = "Barrier Type") %>%
+  dplyr::mutate(`Barrier Type` = reorder(`Barrier Type`, Total)) %>%
+  dplyr::arrange(Total)
 
 # 3) Stacked plot by Region (top 20 only)
-barrier_plot_region <- ggplot(barrier_counts_region_top20,
-  aes(x = `Barrier Type`, y = Occurrences, fill = Region)) +
-  geom_col(position = "stack") +
-  coord_flip() +
-  scale_fill_viridis_d(option = "plasma", name = "Region") +
-  labs(title = "Top 20 adaptation barriers by UNFCCC region (stacked)",
+barrier_plot_region <- ggplot2::ggplot(barrier_counts_region_top20,
+  ggplot2::aes(x = `Barrier Type`, y = Occurrences, fill = Region)) +
+  ggplot2::geom_col(position = "stack") +
+  ggplot2::coord_flip() +
+  ggplot2::scale_fill_viridis_d(option = "plasma", name = "Region") +
+  ggplot2::labs(title = "Adaptation barriers by UNFCCC region",
        x = NULL, y = "Occurrences") +
-  theme_minimal(base_size = 10)
+  ggplot2::theme_minimal(base_size = 10)
 
 barrier_plot_region
 
