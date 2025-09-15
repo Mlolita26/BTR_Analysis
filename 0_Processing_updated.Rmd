@@ -1256,6 +1256,27 @@ ggplot(theme_counts, aes(x = SectorType_GGA, y = n, fill = Element)) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 ```
+## Sector consistency per country 
+
+```{r}
+# Elements of interest
+elements_focus <- c("Hazard", "System at risk", "Action")
+
+# Count rows per Country, Element, and SectorType_GGA
+theme_counts_country <- adaptdata %>%
+  filter(Element %in% elements_focus,
+         !is.na(SectorType_GGA),
+         SectorType_GGA != "",
+         SectorType_GGA != "NA") %>%
+  group_by(Country, Element, SectorType_GGA) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  arrange(Country, Element, desc(n))
+
+# Interactive table
+datatable(theme_counts_country,
+          options = list(pageLength = 15, autoWidth = TRUE),
+          rownames = FALSE)
+```
 
 # Step 4 : Climate Impact
 
