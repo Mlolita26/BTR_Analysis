@@ -1,6 +1,6 @@
 ---
 title: "0_Processing_updated"
-author: "Namita Joshi (using Lolitas script with updated data)"
+author: "Lolita Muller & Namita Joshi (Mainly Lolita <3 ) "
 date: "`r Sys.Date()`"
 output:
   html_document:
@@ -27,6 +27,7 @@ library(patchwork)
 library(DT)
 library(ellmer)
 library(googledrive)
+library(cowplot)
 ```
 
 # Preparation
@@ -319,26 +320,26 @@ hazard_counts <- adaptdata_with_region %>%
   rename(`Hazard Category` = HazardType,
          Occurrences = n)
 
-ggplot(hazard_counts,
+hazard_plot<-ggplot(hazard_counts,
        aes(x = reorder(`Hazard Category`, Occurrences),
            y = Occurrences,
            fill = Region)) +
   geom_col(show.legend = FALSE) +
   coord_flip() +
   scale_fill_viridis_d(option = "plasma") +
-  labs(title = "Hazard categories by UNFCCC region",
+  labs(title = "Hazard categories",
        x = NULL, y = "Occurrences") +
   theme_minimal(base_size = 12) +
   facet_wrap(~Region, scales = "free_y")
 
-ggplot(hazard_counts,
+hazardxregion<-ggplot(hazard_counts,
        aes(x = reorder(`Hazard Category`, Occurrences),
            y = Occurrences,
            fill = Region)) +
   geom_col(position = "stack") +   # stacked bars
   coord_flip() +
   scale_fill_viridis_d(option = "plasma") +
-  labs(title = "Hazard categories by UNFCCC region",
+  labs(title = "Hazard categories",
        x = NULL, y = "Occurrences", fill = "Region") +
   theme_minimal(base_size = 12) +
   theme(
@@ -662,27 +663,27 @@ DT::datatable(
 write.csv(system_counts, "system_counts.csv", row.names = FALSE)
 
 # --- 4a. Facetted by region ---
-ggplot(system_counts,
+system_plot<-ggplot(system_counts,
        aes(x = reorder(`System at Risk Category`, Occurrences),
            y = Occurrences,
            fill = Region)) +
   geom_col(show.legend = FALSE) +
   coord_flip() +
   scale_fill_viridis_d(option = "plasma") +
-  labs(title = "Systems at risk by UNFCCC region (facetted)",
+  labs(title = "Systems at risk by UNFCCC region",
        x = NULL, y = "Occurrences") +
   theme_minimal(base_size = 12) +
   facet_wrap(~Region, scales = "free_y")
 
 # --- 4b. Stacked bars by region ---
-ggplot(system_counts,
+systemxregion<-ggplot(system_counts,
        aes(x = reorder(`System at Risk Category`, Occurrences),
            y = Occurrences,
            fill = Region)) +
   geom_col(position = "stack") +
   coord_flip() +
   scale_fill_viridis_d(option = "plasma") +
-  labs(title = "Systems at risk by UNFCCC region (stacked)",
+  labs(title = "Systems at risk",
        x = NULL, y = "Occurrences", fill = "Region") +
   theme_minimal(base_size = 12) +
   theme(
@@ -1601,7 +1602,7 @@ impact_categories <- ensure_keywords_covered(impact_categories)
 # ---- Matching helpers & pipeline ----
 
 # Read your extracted keywords file
-adaptdata <- read_csv("adaptdata_climateimpact6nano.csv")
+adaptdata <- read_csv("data/adaptdata_climateimpact6nano.csv")
 
 # Sanity check
 stopifnot(exists("impact_categories"),
@@ -1754,7 +1755,7 @@ if (nrow(sys_with_impacts) == 0L) {
 
 
 #load manualy checked data
-adaptdata <- read_csv("adaptdata_climateimpact6nano_cat_sys_batch_manual.csv")
+adaptdata <- read_csv("data/adaptdata_climateimpact6nano_cat_sys_batch_manual.csv")
 
 adaptdata <- adaptdata %>%
   group_by(Country, Document, Element, ElementLabel, ElementText) %>%
@@ -1922,6 +1923,24 @@ DT::datatable(
 # Optional save
 write.csv(impact_top15, "impact_top15_by_region_merged.csv", row.names = FALSE)
 
+###Impact plot not stacked
+
+impact_plot_notstacked <- ggplot(impact_top15,
+       aes(x = reorder(`Impact Category`, Occurrences, FUN = sum),
+           y = Occurrences,
+           fill = Region)) +
+  geom_col(show.legend = FALSE) +          # one bar per category per region
+  coord_flip() +
+  scale_fill_viridis_d(option = "plasma") +
+  labs(title = "Top 15 Climate impacts",
+       x = NULL, y = "Occurrences") +
+  facet_wrap(~ Region, ncol = 3, scales = "free_y") +  # one panel per region
+  theme_minimal(base_size = 10) +
+  theme(
+    axis.text.y = element_text(size = 9),
+    axis.text.x = element_text(size = 9),
+    strip.text = element_text(size = 11, face = "bold")
+  )
 # ---- 5) Plot: stacked bars (regions as colors), ordered by total ----
 impact_plot <- ggplot(impact_top15,
        aes(x = reorder(`Impact Category`, Occurrences, FUN = sum),
@@ -1930,7 +1949,7 @@ impact_plot <- ggplot(impact_top15,
   geom_col(position = "stack") +
   coord_flip() +
   scale_fill_viridis_d(option = "plasma") +
-  labs(title = "Top 15 Climate impacts by UNFCCC region (merged categories)",
+  labs(title = "Top 15 Climate impacts",
        x = NULL, y = "Occurrences", fill = "Region") +
   theme_minimal(base_size = 10) +
   theme(
@@ -1940,6 +1959,35 @@ impact_plot <- ggplot(impact_top15,
 
 impact_plot
 
+##combining the plots
+
+library(ggplot2)
+library(cowplot)
+
+library(ggplot2)
+library(cowplot)
+
+# 1. Make a fresh middle plot with legend
+systemxregion_with_legend <- systemxregion +
+  theme(legend.position = "bottom")
+
+# 2. Extract legend
+legend <- cowplot::get_legend(systemxregion_with_legend)
+
+# 3. Strip legends from all plots for display
+hazardxregion_nl <- hazardxregion + theme(legend.position = "none")
+systemxregion_nl <- systemxregion + theme(legend.position = "bottom")
+impact_plot_nl   <- impact_plot   + theme(legend.position = "none")
+
+# 4. Arrange top row of 3 plots
+top_row <- plot_grid(hazardxregion_nl, systemxregion_nl, impact_plot_nl, ncol = 3)
+
+# 5. Stack top row and legend
+combined_plot <- plot_grid(top_row, legend, ncol = 1,
+                           rel_heights = c(1, 0.1))  # adjust legend space
+
+# 6. Show combined plot
+combined_plot
 
 ```
 
@@ -2762,7 +2810,7 @@ Action Level classification
 
 ```{r,echo=FALSE}
 
-adaptdata<-read.csv("adaptdata_action_level_nano6.csv")
+adaptdata<-read.csv("data/adaptdata_action_level_nano6.csv")
 
 
 # ---- Fix: set missing InterventionType_GPT to "economic" if Element == "Action" ----
@@ -3110,9 +3158,9 @@ DT::datatable(
 
 ```{r,echo=FALSE,}
 # --- Results: simple bar chart (Input / Process / Output / Outcome) ---
-adaptdata<-read.csv("adaptdata_results_nano6.csv")
+adaptdata<-read.csv("data/adaptdata_results_nano6.csv")
 
-RESULT_LABELS <- c("Input","Process","Output","Outcome","Impact")
+RESULT_LABELS <- c("Input","Output","Outcome","Impact")
 
 
 result_counts <- adaptdata %>%
@@ -3147,6 +3195,39 @@ p_results <- ggplot(result_counts,
         axis.text.x = element_text(size = 12))
 
 p_results
+
+#####Results using manual tagging 
+result_counts_manual <- adaptdata %>%
+  filter(Element == "Result",
+         !is.na(ResultType),
+         nzchar(ResultType)) %>%
+  mutate(ResultType = str_squish(ResultType)) %>%
+  # keep only canonical labels and order them
+  mutate(ResultType = sapply(ResultType, function(t) {
+    hit <- RESULT_LABELS[tolower(RESULT_LABELS) == tolower(t)]
+    ifelse(length(hit), hit, NA_character_)
+  })) %>%
+  filter(!is.na(ResultType)) %>%
+  mutate(ResultType = factor(ResultType, levels = RESULT_LABELS)) %>%
+  count(ResultType, name = "Occurrences") %>%
+  arrange(ResultType) %>%
+  mutate(Share = Occurrences / sum(Occurrences),
+         Label = paste0(Occurrences, " (", round(Share*100), "%)"))
+
+# Plot
+p_results_manual <- ggplot(result_counts_manual,
+  aes(x = ResultType, y = Occurrences, fill = ResultType)) +
+  geom_col(width = 0.7, show.legend = FALSE) +
+  geom_text(aes(label = Label), hjust = -0.15, size = 4) +
+  coord_flip(ylim = c(0, max(result_counts$Occurrences)*1.15)) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(title = "Result types by count",
+       x = NULL, y = "Occurrences") +
+  theme_minimal(base_size = 12) +
+  theme(axis.text.y = element_text(size = 13),
+        axis.text.x = element_text(size = 12))
+
+p_results_manual
 ```
 
 by regions 
@@ -3209,6 +3290,27 @@ p_results_region_counts <- ggplot(
         axis.text.x = element_text(size = 12))
 
 p_results_region_counts
+
+### Not stacked
+
+p_results_region_counts_notstacked<- ggplot(
+  result_counts_region,
+  aes(x = reorder(ResultType_GPT, Occurrences, FUN = sum),
+      y = Occurrences,
+      fill = Region)
+) +
+  geom_col(show.legend = FALSE, width = 0.75) +   # remove legend, separate panels
+  coord_flip() +
+  scale_fill_viridis_d(option = "plasma") +
+  labs(title = "Result types by UNFCCC region",
+       x = NULL, y = "Occurrences") +
+  facet_wrap(~ Region, ncol = 3, scales = "free_y") +  # one plot per region
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.y = element_text(size = 11),
+    axis.text.x = element_text(size = 11),
+    strip.text = element_text(size = 12, face = "bold")
+  )
 
 # --- Optional: proportional shares within each Result type ---
 p_results_region_share <- ggplot(
