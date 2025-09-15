@@ -1188,6 +1188,74 @@ datatable(
 
 
 ```
+## Sector consistency analysis 
+
+```{r,echo=FALSE}
+sector_counts <- adaptdata %>%
+  filter(!is.na(SectorType_GGA) & SectorType_GGA != "NA" & SectorType_GGA != "") %>%
+  group_by(Element) %>%
+  summarise(rows_with_sector = n())
+
+# Bar plot
+ggplot(sector_counts, aes(x = Element, y = rows_with_sector, fill = Element)) +
+  geom_col() +
+  labs(
+    title = "GGA Sectors by Element",
+    x = "Element category",
+    y = "Count of rows"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  coord_flip()  # flips axes if you want horizontal bars
+
+sector_counts_subset <- adaptdata %>%
+  filter(!is.na(SectorType_GGA) & SectorType_GGA != "NA" & SectorType_GGA != "",
+         Element %in% c("System at risk", "Action", "Hazard")) %>%
+  group_by(Element) %>%
+  summarise(rows_with_sector = n())
+
+# Bar plot
+ggplot(sector_counts_subset, aes(x = Element, y = rows_with_sector, fill = Element)) +
+  geom_col() +
+  labs(
+    title = "GGA Sector by Element",
+    x = "Element category",
+    y = "Count of rows"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+
+```{r,echo=FALSE}
+
+# Filter for elements of interest
+elements_focus <- c("Hazard", "System at risk", "Action")
+
+theme_counts <- adaptdata %>%
+  filter(Element %in% elements_focus,
+         !is.na(SectorType_GGA),
+         SectorType_GGA != "",
+         SectorType_GGA != "NA") %>%
+  group_by(Element, SectorType_GGA) %>%
+  summarise(n = n(), .groups = "drop")
+
+datatable(theme_counts,
+          options = list(pageLength = 10, autoWidth = TRUE),
+          rownames = FALSE)
+# Plot
+ggplot(theme_counts, aes(x = SectorType_GGA, y = n, fill = Element)) +
+  geom_col(position = "dodge") +
+  scale_fill_viridis_d(option = "cividis") +
+  labs(
+    title = "Themes covered under Hazard, System at risk, and Action",
+    x = "Theme",
+    y = "Count"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
 
 # Step 4 : Climate Impact
 
