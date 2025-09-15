@@ -3010,7 +3010,7 @@ DT::datatable(
 
 
 ```{r,echo=FALSE,}
-## ========= Load data =========
+# # ========= Load data =========
 # adaptdata <- readr::read_csv("data/adaptdata_action_level_nano6.csv")
 # 
 # suppressPackageStartupMessages({
@@ -3042,38 +3042,62 @@ DT::datatable(
 # # ========= Batch prompt: NEW protocol =========
 # make_result_batch_prompt <- function(txts) {
 #   glue::glue(
-# "Classify each passage by the single *result type* it reports.
+# 'Classify each passage by the single *result type* it reports.
 # Choose EXACTLY ONE label per passage. Return N lines in the same order.
 # Output only the label text (no punctuation).
 # 
 # Allowed labels (use these exact words only): Output | Outcome | Impact
 # 
-# DEFINITIONS
-# - Output — Relates to immediate results from the implementation of activities, without assessing if these results lead to changes in the baseline condition. This includes references to products or services developed or disseminated, adopted policies, trees planted, improved cookstoves installed; seed varieties disseminated,promotion of practices without mentionning adoption etc.; coverage (area) of the activity or the output; beneficiaries or adopters of the activity or the product, including beneficiaries or adopters of an improved technology, individuals trained, etc. results capturing amount of finance mobilized or mobilized as well as data and assessments are considered outputs. 
-#   system/platform/center established/launched; **finance mobilized/allocated/spent**; **risk analyses/maps/datasets/
-#   baselines/assessments produced**. (Finance & data/assessments are Outputs.)
-# - Outcome — intermediate CHANGES in behavior or condition:
-#   knowledge improved; adoption/uptake increased; access/coverage increased as a change from baseline; migration/relocation occurred;
-#   service reliability improved; preparedness or capacity *improved* (as a change).
-# - Impact —Relates to the ultimate effect of adaptation measures in relation to climate risks, indicating the level of adequacy and effectiveness of those measures in enhancing resilience and adaptive capacities and reducing vulnerability. Examples of these types of results might include agricultural productivity improvements, water use efficiency rates, livelihoods and wellbeing scores, food security rates, farmers recovering from extreme events, etc.
-# Relative to climate risks,improve resilience (adequacy/effectiveness):
-#   yields/productivity up or losses down; water-use efficiency rate improved;water quality; food security/livelihoods/wellbeing improved;
-#   resilience ↑ / vulnerability ↓; mortality/morbidity ↓; recovery after extremes;strenghtening resilience; **better response to a hazard** (e.g., reduced damages/fatalities from floods due to the measure/linked to resilience).
+# DEFINITIONS (updated; strict ranking Impact > Outcome > Output)
 # 
+# - Impact — Ultimate effects relative to climate risks (adequacy/effectiveness) OR improved system condition/vulnerability, even without numbers:
+#   • reduced risk/impacts/harm (fewer deaths/injuries/damages/losses; avoided losses); faster/better hazard response/recovery;
+#   • resilience/adaptive capacity strengthened or vulnerability reduced;
+#   • food/water/energy security improved (incl. safe water/sanitation coverage increased as a vulnerability-reducing condition);
+#   • agricultural productivity/yields ↑ or losses ↓;
+#   • ecosystem condition improved (forest cover ↑, biodiversity/populations ↑, river/land continuity restored, habitat condition improved).
 # 
-# EDGE CASES / HARD NEGATIVES
-# - “risk/hazard maps produced”, “baseline/assessment/feasibility/inventory compiled”, “guidelines/manual drafted” → Output (NOT Outcome).
-# - Counts without change (e.g., “10,000 stoves installed”, “2,000 ha reforested”, “22 schemes built”, “500 trained”) → Output.
-# - Policy/plan “adopted/approved/issued/distribution”, or platform “established/launched” → Output (unless a measured change is stated → Outcome).
-# - “lead time improved”, “false alarms reduced”, “fewer deaths/injuries/damages in floods”,river connectivity,adaptative capcity of women → Impact (better hazard response).
+# - Outcome — Intermediate CHANGES in behavior or condition (not the ultimate effect):
+#   • adoption/use/operation increased; access/coverage/connection/participation/share/rate increased (change from baseline);
+#   • integration/coordination/practices established and running (e.g., routine reporting, monitoring systems operating);
+#   • service reliability/preparedness/capacity improved, where hazard adequacy/effect is not claimed.
+# 
+# - Output — Deliverables or counts with NO stated change in behavior/coverage/condition and NO hazard adequacy/effect:
+#   • items produced/installed/distributed; area covered; people trained/beneficiaries counted;
+#   • policy/plan adopted/approved/issued; platform/center/system established/launched;
+#   • finance mobilized/allocated/spent; risk analyses/maps/datasets/baselines/assessments/guidelines produced.
+# 
+# DECISION ORDER (apply strictly)
+# 1) **Impact overrides:** If the passage states or clearly implies any of:
+#    – reduced risk/impacts/harm (fewer damages/losses/fatalities; avoided losses);
+#    – resilience ↑ / vulnerability ↓; better/faster hazard response or recovery;
+#    – improved food/water/energy security, including *safe water/sanitation coverage increased* as a vulnerability-reducing condition;
+#    – agricultural productivity/yields ↑ or losses ↓;
+#    – improved **ecosystem condition** (forest cover ↑, biodiversity/populations ↑, river continuity restored, habitats improved).
+#    → Return **Impact**.
+# 2) Else if there is explicit **change-from-baseline** in behavior/condition
+#    (increase/decrease/improve/rise/fall/uptake/adoption/use/operation/coverage/access/connection/participation/share/rate/knowledge/capacity/integration/coordination) → **Outcome**.
+# 3) Else (deliverables/adoption/establishment/training/finance/data/assessments with no change) → **Output**.
+# 
+# NUMBERS NOTE
+# • Numbers alone do **not** imply Output. If numbers quantify a changed state (e.g., coverage/share increased), apply Outcome/Impact rules.
+# 
+# SECTORAL EXAMPLES
+# • “Irrigable area increased mitigating drought risk” → Impact.
+# • “Safe water/sanitation coverage increased” (reduces vulnerability) → Impact.
+# • “Forest cover up; tiger population increased; river continuity restored” → Impact.
+# • “Promotion/awareness with no adoption change stated” → Output.
+# • “Plan adopted; platform launched; baseline produced; training delivered; finance mobilized” → Output.
+# • “Embankments built for flood management” → Outcome unless a reduced risk/impact is claimed → Impact.
 # 
 # Output format:
 # Return ONLY one of: Output | Outcome | Impact
 # 
 # INPUTS (numbered):
-# {paste0(sprintf('%d) %s', seq_along(txts), txts), collapse = '\n')}"
+# {paste0(sprintf("%d) %s", seq_along(txts), txts), collapse = "\n")}'
 #   )
 # }
+# 
 # 
 # # ========= Batch classifier (no NA; fallback = Output) =========
 # classify_result_type_batch <- function(txts, model = RESULT_MODEL, chunk_size = CHUNK_SIZE) {
@@ -3157,7 +3181,11 @@ DT::datatable(
 
 
 ```{r,echo=FALSE,}
-# Copy data to avoid overwriting
+# #Copy data to avoid overwriting
+# 
+# a<-adaptdata%>%filter(Element=="Result")%>%select(Country,Element,ElementText,ResultType,ResultType_GPT)
+# 
+# 
 # a2 <- a %>%
 #   mutate(
 #     # normalize: treat all Inputs as Outputs
@@ -4073,6 +4101,8 @@ DT::datatable(
 ```{r}
 
 adaptdata<-read.csv("data/adaptdata_barriers.csv")
+
+# a<-adaptdata_barriers_long%>%filter(Element=="Barriers")%>%select(RowID,Country,Element,ElementText,BarrierType,BarrierType_GPT)%>%distinct
 # Build region key (+ manual fixes)
 region_key <- overview %>%
   dplyr::select(Country, Region) %>%
