@@ -982,14 +982,15 @@ kable(gga_table, "html", escape = FALSE, align = "l") %>%
 
 ```{r,echo=FALSE}
 
-
-
 # Build regex patterns from the table above (case-insensitive)
 gga_patterns <- list(
   "Water and sanitation" =
     paste0("(", paste(c(
       "sanitation","water and sanitation","sewerage","hygiene",
-      "water security","water use","water and energy","water, sanitation and waste"
+      "water security","water use","water and energy","water, sanitation and waste",
+      "water reserve","water reserves","groundwater","water quality","water resources",
+      "water availability","water stress","water supply","water sufficiency",
+      "water deficit","available water","water shortages","water management","water security"
     ), collapse="|"), ")"),
 
   "Food and agriculture" =
@@ -1041,11 +1042,12 @@ gga_patterns <- list(
     ), collapse="|"), ")"),
 
   "Cultural heritage" =
-    paste0("(", paste(c("cultural heritage","heritage site","traditional knowledge","local knowledge","indigenous"
+    paste0("(", paste(c(
+      "cultural heritage","heritage site","traditional knowledge","local knowledge","indigenous"
     ), collapse="|"), ")")
 )
 
-# Priority order for tie-breaks (edit if you prefer a different precedence)
+# Priority order for tie-breaks
 gga_priority <- names(gga_patterns)
 
 # Ensure column exists
@@ -1065,15 +1067,21 @@ adaptdata <- adaptdata %>%
       str_count(.gga_text, regex(pat, ignore_case = TRUE))
     }, integer(1))),
     SectorType_GGA = {
-      cnt <- unlist(.counts_gga)
-      if (all(cnt == 0L)) NA_character_ else {
-        winners <- which(cnt == max(cnt))
-        gga_priority[winners[1]]
+      # Simple special case: if Sector is exactly "water" (case-insensitive)
+      if (!is.na(Sector) && str_to_lower(str_trim(Sector)) == "water") {
+        "Water and sanitation"
+      } else {
+        cnt <- unlist(.counts_gga)
+        if (all(cnt == 0L)) NA_character_ else {
+          winners <- which(cnt == max(cnt))
+          gga_priority[winners[1]]
+        }
       }
     }
   ) %>%
   ungroup() %>%
   select(-.gga_text, -.counts_gga)
+
 
 
 ```
@@ -1228,32 +1236,79 @@ ggplot(sector_counts_subset, aes(x = Element, y = rows_with_sector, fill = Eleme
 
 
 ```{r,echo=FALSE}
+# --- Define fixed orders ---
+theme_order <- c(
+  "Water and sanitation",
+  "Food and agriculture",
+  "Health",
+  "Biodiversity and ecosystems",
+  "Infrastructure and human settlements",
+  "Poverty eradication and livelihoods",
+  "Cultural heritage"
+)
 
-# Filter for elements of interest
-elements_focus <- c("Hazard", "System at risk", "Action")
+element_order <- c(
+  "Action",
+  "Hazard",
+  "System at risk",
+  "Climate impact",
+  "Adaptation priorities",
+  "Result",
+  "Indicator",
+  "Barriers"
+)
 
-theme_counts <- adaptdata %>%
-  filter(Element %in% elements_focus,
-         !is.na(SectorType_GGA),
+# --- Aggregate data with fixed factor levels ---
+theme_counts_all <- adaptdata %>%
+  filter(!is.na(SectorType_GGA),
          SectorType_GGA != "",
          SectorType_GGA != "NA") %>%
   group_by(Element, SectorType_GGA) %>%
-  summarise(n = n(), .groups = "drop")
+  summarise(n = n(), .groups = "drop") %>%
+  mutate(
+    SectorType_GGA = factor(SectorType_GGA, levels = theme_order, ordered = TRUE),
+    Element        = factor(Element, levels = element_order, ordered = TRUE)
+  )
 
-datatable(theme_counts,
-          options = list(pageLength = 10, autoWidth = TRUE),
-          rownames = FALSE)
-# Plot
-ggplot(theme_counts, aes(x = SectorType_GGA, y = n, fill = Element)) +
+theme_counts_all <- theme_counts_all %>%
+  mutate(Element = factor(Element, levels = element_order, ordered = TRUE))
+
+
+# --- Dodged version ---
+ggplot(theme_counts_all, aes(x = SectorType_GGA, y = n, fill = Element)) +
   geom_col(position = "dodge") +
-  scale_fill_viridis_d(option = "cividis") +
+  scale_fill_brewer(palette = "Paired") +   # or choose a fixed palette
   labs(
-    title = "Themes covered under Hazard, System at risk, and Action",
+    title = "Themes covered across all Elements",
     x = "Theme",
     y = "Count"
   ) +
+  scale_x_discrete(labels = function(x) stringr::str_wrap(x, width = 15)) +
   theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  theme(
+    axis.text.x = element_text(angle = 30, hjust = 1),
+    legend.position = "bottom",
+    legend.key.size = unit(0.8, "lines")
+  ) +
+  guides(fill = guide_legend(nrow = 2, byrow = TRUE))
+
+# --- Stacked version ---
+ggplot(theme_counts_all, aes(x = SectorType_GGA, y = n, fill = Element)) +
+  geom_col(position = "stack") +
+  scale_fill_brewer(palette = "Paired") +
+  labs(
+    title = "Themes covered across all Elements",
+    x = "Theme",
+    y = "Count"
+  ) +
+  scale_x_discrete(labels = function(x) stringr::str_wrap(x, width = 15)) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 30, hjust = 1),
+    legend.position = "bottom",
+    legend.key.size = unit(0.8, "lines")
+  ) +
+  guides(fill = guide_legend(nrow = 2, byrow = TRUE))
 
 ```
 ## Sector consistency per country 
@@ -1274,6 +1329,20 @@ theme_counts_country <- adaptdata %>%
 
 # Interactive table
 datatable(theme_counts_country,
+          options = list(pageLength = 15, autoWidth = TRUE),
+          rownames = FALSE)
+
+
+theme_counts_country_all <- adaptdata %>%
+  filter(!is.na(SectorType_GGA),
+         SectorType_GGA != "",
+         SectorType_GGA != "NA") %>%
+  group_by(Country, Element, SectorType_GGA) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  arrange(Country, Element, desc(n))
+
+# Interactive table
+datatable(theme_counts_country_all,
           options = list(pageLength = 15, autoWidth = TRUE),
           rownames = FALSE)
 ```
