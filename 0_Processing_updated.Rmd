@@ -961,7 +961,7 @@ gga_table <- tribble(
   "ocean, marine, coast, coastal land use, coastal zone, blue carbon, mangrove, forest, environ, environment, enviornment, ecosystem, biodiversity, natural, ecology, ecolog, wildlife, REDD, peatland, protected area, freshwater, Terrestrial, Tourism and Coastal Zone Management, Coastal zone management",
 
   "Infrastructure and human settlements",
-  "city, cities, urban, settlement, infrastructure, housing, habitat, industr, waste, transport, energy, landfills, sanitary landfills, mining, mineral resources, mineral products, telecommunications, Infrastructure, transport and building, Infrastructure and services, Cities and Built Environment, Land Use and Human Settlements Development, Habitat, urban planning and development of the territory, Housing, Territorial Development and Urban Planning, Renewable Energy, Urban planning and infrastructure, Urban Development & Tourism, spatial planning, planning, territory, Private sector/trade; Manufacturing; Business process, private sector, public sector",
+  "city, cities, urban, settlement, infrastructure, housing, habitat, industr, waste, transport, energy, landfills, sanitary landfills, mining, mineral resources, mineral products, telecommunications, Infrastructure, transport and building, Infrastructure and services, Cities and Built Environment, Land Use and Human Settlements Development, Habitat, urban planning and development of the territory, Housing, Territorial Development and Urban Planning, Renewable Energy, Urban planning and infrastructure, Urban Development & Tourism, spatial planning, planning, territory, Private sector/trade; Manufacturing; Business process, private sector, public sector,buildings",
 
   "Poverty eradication and livelihoods",
   "social, poverty, people, econom, capacity, education, employment, tourism, rural development, sustainable development, economic and social infrastructure, livelihood, income, revenue, social protection, protection, transfer, social infrastructures, Education, research, Education, training, research, Multiple: Social Economy, Tourism, Multiple: Social Affairs, Women and Family, Multiple: Planning, Rural development, Multiple: Sustainable development, Planning",
@@ -981,7 +981,7 @@ kable(gga_table, "html", escape = FALSE, align = "l") %>%
 
 
 ```{r,echo=FALSE}
-
+adaptdata<-read.csv("adaptdata_results_nano6.csv")
 # Build regex patterns from the table above (case-insensitive)
 gga_patterns <- list(
   "Water and sanitation" =
@@ -990,7 +990,7 @@ gga_patterns <- list(
       "water security","water use","water and energy","water, sanitation and waste",
       "water reserve","water reserves","groundwater","water quality","water resources",
       "water availability","water stress","water supply","water sufficiency",
-      "water deficit","available water","water shortages","water management","water security"
+      "water deficit","available water","water shortages","water management","water security","water"
     ), collapse="|"), ")"),
 
   "Food and agriculture" =
@@ -1014,7 +1014,7 @@ gga_patterns <- list(
       "ocean","marine","coast","coastal land use","coastal zone","blue carbon","mangrove",
       "forest","environ","environment","enviornment","ecosystem","biodiversity","natural",
       "ecology","ecolog","wildlife","REDD","peatland","protected area","freshwater",
-      "Terrestrial","Tourism and Coastal Zone Management","Coastal zone management"
+      "Terrestrial","Tourism and Coastal Zone Management","Coastal zone management","sea","ocean","marine"
     ), collapse="|"), ")"),
 
   "Infrastructure and human settlements" =
@@ -1028,7 +1028,7 @@ gga_patterns <- list(
       "Housing, Territorial Development and Urban Planning",
       "Renewable Energy","Urban planning and infrastructure","Urban Development & Tourism",
       "spatial planning","\\bplanning\\b","territory",
-      "Private sector/trade; Manufacturing; Business process","private sector","public sector"
+      "Private sector/trade; Manufacturing; Business process","private sector","public sector","buildings","building structures","road","roads"
     ), collapse="|"), ")"),
 
   "Poverty eradication and livelihoods" =
@@ -1053,12 +1053,25 @@ gga_priority <- names(gga_patterns)
 # Ensure column exists
 if (!"SectorType_GGA" %in% names(adaptdata)) adaptdata$SectorType_GGA <- NA_character_
 
-# Build text to scan (Sector first, with SystemType as context)
+
+
+
+```
+
+
+## sector for all rows
+
+```{r}
+# Ensure column exists
+if (!"SectorType_GGA" %in% names(adaptdata)) adaptdata$SectorType_GGA <- NA_character_
+
 adaptdata <- adaptdata %>%
   mutate(
-    .gga_text = paste0(
-      coalesce(as.character(Sector), ""), " ",
-      coalesce(as.character(SystemType), "")
+    # Use Sector if available; if not, fall back to ElementText
+    .gga_text = if_else(
+      !is.na(Sector) & str_trim(Sector) != "",
+      paste0(as.character(Sector), " ", coalesce(as.character(ElementText), "")),
+      coalesce(as.character(ElementText), "")
     )
   ) %>%
   rowwise() %>%
@@ -1067,7 +1080,7 @@ adaptdata <- adaptdata %>%
       str_count(.gga_text, regex(pat, ignore_case = TRUE))
     }, integer(1))),
     SectorType_GGA = {
-      # Simple special case: if Sector is exactly "water" (case-insensitive)
+      # Special case: Sector exactly "water"
       if (!is.na(Sector) && str_to_lower(str_trim(Sector)) == "water") {
         "Water and sanitation"
       } else {
@@ -1082,8 +1095,6 @@ adaptdata <- adaptdata %>%
   ungroup() %>%
   select(-.gga_text, -.counts_gga)
 
-
-
 ```
 
 ## Sector coverage 
@@ -1094,6 +1105,7 @@ total_sector_rows <- sum(!is.na(adaptdata$Sector))
 classified_sector_rows <- sum(!is.na(adaptdata$SectorType))
 classified_sector_rows_gga <- sum(!is.na(adaptdata$SectorType_GGA))
 
+
 cat("**SectorType (IPCC):**", classified_sector_rows, "of", total_sector_rows, "rows tagged\n")
 cat("**SectorType_GGA (GGA):**", classified_sector_rows_gga, "of", total_sector_rows, "rows tagged\n")
 cat("**Coverage Rate:**", round(classified_sector_rows / total_sector_rows * 100, 1), "%\n\n")
@@ -1101,9 +1113,31 @@ cat("**Coverage Rate:**", round(classified_sector_rows / total_sector_rows * 100
 
 
 ```
+```{r}
+# adaptdata_previous<-read.csv("adaptdata_results_nano6.csv")
+# 
+# adaptdata <- adaptdata_previous %>%
+#   select(-SectorType_GGA) %>%                # drop old classification
+#   left_join(
+#     adaptdata %>% select(...1, SectorType_GGA), 
+#     by = "...1"                             # replace with the correct unique key
+#   )
+# 
+# write.csv(adaptdata,"data/adaptdata_results_nano6.csv")
+# # Option 2: If you ran the improved regex classification *directly* on adaptdata
+# # then just overwrite:
+# adaptdata <- adaptdata %>%
+#   mutate(SectorType_GGA = adaptdata_new$SectorType_GGA)
+
+
+```
+
+
 ## Sector type summary 
 
 ```{r,echo=FALSE}
+
+adaptdata<-read.csv("adaptdata_results_nano6.csv")
 
 # --- IPCC Sector Type Frequency ---
 sector_ipcc_counts <- adaptdata %>%
@@ -1236,6 +1270,9 @@ ggplot(sector_counts_subset, aes(x = Element, y = rows_with_sector, fill = Eleme
 
 
 ```{r,echo=FALSE}
+
+adaptdata<-read.csv("adaptdata_results_nano6.csv")
+
 # --- Define fixed orders ---
 theme_order <- c(
   "Water and sanitation",
@@ -1244,7 +1281,8 @@ theme_order <- c(
   "Biodiversity and ecosystems",
   "Infrastructure and human settlements",
   "Poverty eradication and livelihoods",
-  "Cultural heritage"
+  "Cultural heritage",
+  "NA"
 )
 
 element_order <- c(
@@ -1260,9 +1298,7 @@ element_order <- c(
 
 # --- Aggregate data with fixed factor levels ---
 theme_counts_all <- adaptdata %>%
-  filter(!is.na(SectorType_GGA),
-         SectorType_GGA != "",
-         SectorType_GGA != "NA") %>%
+  filter(Element!="NA")%>%
   group_by(Element, SectorType_GGA) %>%
   summarise(n = n(), .groups = "drop") %>%
   mutate(
@@ -4659,3 +4695,5 @@ barrier_plot_region
 - **Sector Tagging (IPCC & GGA):**  
   Sector tagging shows **strong overall coverage**, particularly due to the mapping from both direct sector mentions and `SystemType`.  
   That said, a number of rows still remain **unclassified**, either because sector information wasn't mentioned explicitly in the original source or because it was too ambiguous to map reliably. It's unclear whether these untagged rows should be a concern, but they could be flagged for manual review depending on use case.
+
+
