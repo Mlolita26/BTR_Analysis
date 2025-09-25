@@ -1271,7 +1271,7 @@ ggplot(sector_counts_subset, aes(x = Element, y = rows_with_sector, fill = Eleme
 
 ```{r,echo=FALSE}
 
-adaptdata<-read.csv("adaptdata_results_nano6.csv")
+adaptdata<-read.csv("data/adaptdata_results_nano6.csv")
 
 # --- Define fixed orders ---
 theme_order <- c(
@@ -1329,22 +1329,14 @@ ggplot(theme_counts_all, aes(x = SectorType_GGA, y = n, fill = Element)) +
   guides(fill = guide_legend(nrow = 2, byrow = TRUE))
 
 # --- Stacked version ---
-ggplot(theme_counts_all, aes(x = SectorType_GGA, y = n, fill = Element)) +
-  geom_col(position = "stack") +
-  scale_fill_brewer(palette = "Paired") +
-  labs(
-    title = "Themes covered across all Elements",
-    x = "Theme",
-    y = "Count"
-  ) +
+ggplot(theme_counts_all, aes(x = SectorType_GGA, y = n)) +
+  geom_col(fill = "#377EB8") +
+  labs(title = "Themes covered across all Elements", x = "Theme", y = "Count") +
   scale_x_discrete(labels = function(x) stringr::str_wrap(x, width = 15)) +
   theme_minimal() +
-  theme(
-    axis.text.x = element_text(angle = 30, hjust = 1),
-    legend.position = "bottom",
-    legend.key.size = unit(0.8, "lines")
-  ) +
-  guides(fill = guide_legend(nrow = 2, byrow = TRUE))
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+
+
 
 ```
 ## Sector consistency per country 
@@ -4525,88 +4517,50 @@ Higher = better alignment between where risks appear and where actions focus.
 - **Alignment**: largest risk themes ≈ largest action themes; **misalignment** highlights priority gaps.
 
 
-```{r,echo=FALSE}
-adaptdata<-read.csv("data/adaptdata_results_nano6.csv")
+```{r,echo=FALSE,fig.width=18, fig.height=10, dpi=240, out.width="100%"}
 
+adaptdata <- read.csv("data/adaptdata_results_nano6.csv")
 
 # =========================
-# Step 10: GGA Coherence
+# Step 10: GGA Coherence (Top 20 Figures + Full Tables)
 # =========================
 
 suppressPackageStartupMessages({
-  library(dplyr)
-  library(tidyr)
-  library(stringr)
-  library(readr)
-  library(ggplot2)
-  library(forcats)
-  library(DT)
+  library(dplyr); library(tidyr); library(stringr); library(readr)
+  library(ggplot2); library(forcats); library(DT); library(viridisLite)
 })
 
 # ---- 0) Load if needed ----
 if (!exists("adaptdata")) {
   if (file.exists("data/adaptdata_results_nano6.csv")) {
     adaptdata <- readr::read_csv("data/adaptdata_results_nano6.csv", show_col_types = FALSE)
-  } else {
-    stop("adaptdata is not in memory and data/adaptdata_results_nano6.csv was not found.")
-  }
+  } else stop("adaptdata is not in memory and data/adaptdata_results_nano6.csv was not found.")
 }
 
 # ---- 1) Parameters and helpers ----
-# Countries of special interest; change as needed
-countries_focus <- c("Kenya", "Cambodia", "Guyana", "Pakistan", "South Africa")
-
-# Which elements contribute to each side
 risk_like   <- c("System at risk","Climate impact")
 action_like <- c("Action","Result")
 
-# Canonical order of GGA themes (matches your earlier taxonomy)
 theme_order <- c(
-  "Water and sanitation",
-  "Food and agriculture",
-  "Health",
-  "Biodiversity and ecosystems",
-  "Infrastructure and human settlements",
-  "Poverty eradication and livelihoods",
-  "Cultural heritage"
+  "Water and sanitation","Food and agriculture","Health",
+  "Biodiversity and ecosystems","Infrastructure and human settlements",
+  "Poverty eradication and livelihoods","Cultural heritage"
 )
 
-# Optional: coherence on an "effectiveness lens"
 USE_RESULT_WEIGHTS <- FALSE
 RESULT_WEIGHTS <- c(Output = 0.40, Outcome = 0.70, Impact = 1.00)
 
-# Output locations
-out_dir   <- "outputs/coherence"
-fig_dir   <- file.path(out_dir, "figs")
+out_dir <- "outputs/coherence"; fig_dir <- file.path(out_dir, "figs")
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(fig_dir, recursive = TRUE, showWarnings = FALSE)
 
-# ---- Metrics ----
 safe_share <- function(x) { s <- sum(x); if (s == 0) x*0 else x/s }
-
-cosine_sim <- function(p, q) {
-  num <- sum(p*q); den <- sqrt(sum(p*p)) * sqrt(sum(q*q))
-  ifelse(den == 0, 0, num/den)
-}
-
-kl_div <- function(p, q) {
-  eps <- 1e-12
-  p <- p + eps; p <- p/sum(p)
-  q <- q + eps; q <- q/sum(q)
-  sum(p * log(p/q))
-}
-
-js_distance <- function(p, q) {
-  m <- 0.5*(p+q)
-  d <- 0.5*kl_div(p, m) + 0.5*kl_div(q, m)
-  sqrt(d / log(2))   # in [0,1]
-}
-
-coherence_score <- function(p_share, a_share) {
-  cos  <- cosine_sim(p_share, a_share)
-  js_s <- 1 - js_distance(p_share, a_share)
-  score <- pmin(pmax(0.5*cos + 0.5*js_s, 0), 1)
-  list(score = score, cos = cos, js_sim = js_s)
+cosine_sim <- function(p, q) { num <- sum(p*q); den <- sqrt(sum(p*p))*sqrt(sum(q*q)); ifelse(den==0, 0, num/den) }
+kl_div <- function(p, q) { eps <- 1e-12; p <- (p+eps)/sum(p+eps); q <- (q+eps)/sum(q+eps); sum(p*log(p/q)) }
+js_distance <- function(p, q) { m <- 0.5*(p+q); d <- 0.5*kl_div(p,m) + 0.5*kl_div(q,m); sqrt(d/log(2)) }
+coherence_score <- function(p_share, a_share){
+  cos <- cosine_sim(p_share, a_share); js_s <- 1 - js_distance(p_share, a_share)
+  score <- pmin(pmax(0.5*cos + 0.5*js_s, 0), 1); list(score=score, cos=cos, js_sim=js_s)
 }
 
 # ---- 2) Clean & prepare base ----
@@ -4615,60 +4569,42 @@ df0 <- adaptdata %>%
     Element        = str_squish(as.character(Element)),
     Country        = str_squish(as.character(Country)),
     SectorType_GGA = str_squish(as.character(SectorType_GGA))
+  ) %>%
+  mutate(
+    SectorType_GGA = na_if(SectorType_GGA, ""),
+    SectorType_GGA = if_else(SectorType_GGA %in% c("NA","Na","na"), NA_character_, SectorType_GGA)
   )
 
-# Treat missing/placeholder themes as NA
-df0 <- df0 %>%
-  mutate(SectorType_GGA = na_if(SectorType_GGA, ""),
-         SectorType_GGA = if_else(SectorType_GGA %in% c("NA","Na","na"), NA_character_, SectorType_GGA))
-
-# Create a stable vector of themes present in the data (keeps canonical order first)
 present_themes <- df0 %>% filter(!is.na(SectorType_GGA)) %>% distinct(SectorType_GGA) %>% pull()
-themes <- c(theme_order[theme_order %in% present_themes],
-            setdiff(present_themes, theme_order))
+themes <- c(theme_order[theme_order %in% present_themes], setdiff(present_themes, theme_order))
 
-# Optional weighting for the Action/Result side (effectiveness lens)
-add_action_weight <- function(d) {
+add_action_weight <- function(d){
   if (!USE_RESULT_WEIGHTS) {
-    d %>% mutate(.weight = 1)  # every Action/Result row counts as 1
+    d %>% mutate(.weight = 1)
   } else {
-    # Results get weights by ResultType_GPT; Actions default to 1
-    d %>%
-      mutate(
-        ResultType_GPT = as.character(ResultType_GPT),
-        .weight = dplyr::case_when(
-          Element == "Result" & !is.na(ResultType_GPT) & ResultType_GPT %in% names(RESULT_WEIGHTS) ~
-            RESULT_WEIGHTS[ResultType_GPT],
-          Element == "Result" & !is.na(ResultType_GPT) ~ 0.7,  # fallback if odd label appears
-          TRUE ~ 1
-        )
+    d %>% mutate(
+      ResultType_GPT = as.character(ResultType_GPT),
+      .weight = dplyr::case_when(
+        Element == "Result" & !is.na(ResultType_GPT) & ResultType_GPT %in% names(RESULT_WEIGHTS) ~ RESULT_WEIGHTS[ResultType_GPT],
+        Element == "Result" & !is.na(ResultType_GPT) ~ 0.7,
+        TRUE ~ 1
       )
+    )
   }
 }
 
 # ---- 3) Coherence computation (per country) ----
-compute_country_tables <- function(df, country_vec = NULL) {
-  df2 <- df %>%
-    filter(Element %in% c(risk_like, action_like)) %>%
-    filter(!is.na(SectorType_GGA))
+compute_country_tables <- function(df, country_vec = NULL){
+  df2 <- df %>% filter(Element %in% c(risk_like, action_like), !is.na(SectorType_GGA))
+  if (is.null(country_vec)) country_vec <- df2 %>% distinct(Country) %>% pull()
 
-  # Choose countries to evaluate
-  if (is.null(country_vec)) {
-    country_vec <- df2 %>% distinct(Country) %>% pull()
-  }
+  res_tables <- list(); res_summ <- list()
 
-  res_tables <- list()
-  res_summ   <- list()
-
-  for (cc in country_vec) {
-    sub <- df2 %>% filter(Country == cc)
-
+  for (cc in country_vec){
+    sub  <- df2 %>% filter(Country == cc)
     risk <- sub %>% filter(Element %in% risk_like) %>% count(SectorType_GGA, name = "Risk_Count")
-    actn <- sub %>%
-      filter(Element %in% action_like) %>%
-      add_action_weight() %>%
-      group_by(SectorType_GGA) %>%
-      summarise(Action_Count = sum(.weight, na.rm = TRUE), .groups = "drop")
+    actn <- sub %>% filter(Element %in% action_like) %>% add_action_weight() %>%
+      group_by(SectorType_GGA) %>% summarise(Action_Count = sum(.weight, na.rm = TRUE), .groups = "drop")
 
     tab <- full_join(risk, actn, by = "SectorType_GGA") %>%
       mutate(across(c(Risk_Count, Action_Count), ~replace_na(., 0))) %>%
@@ -4681,22 +4617,12 @@ compute_country_tables <- function(df, country_vec = NULL) {
         Country = cc
       )
 
-    # coherence scores
     met <- coherence_score(tab$Risk_Share, tab$Action_Share)
 
-    # Top under/over indexed (exclude any NA themes just in case)
-    top_under <- tab %>%
-      filter(!is.na(SectorType_GGA)) %>%
-      arrange(Delta_Share_Action_minus_Risk) %>%
-  slice_head(n = 3)
-
-    top_over  <- tab %>%
-      filter(!is.na(SectorType_GGA)) %>%
-      arrange(desc(Delta_Share_Action_minus_Risk)) %>%
-  slice_head(n = 3)
+    top_under <- tab %>% arrange(Delta_Share_Action_minus_Risk) %>% slice_head(n = 3)
+    top_over  <- tab %>% arrange(desc(Delta_Share_Action_minus_Risk)) %>% slice_head(n = 3)
 
     res_tables[[cc]] <- tab
-
     res_summ[[cc]] <- tibble::tibble(
       Country       = cc,
       Risk_rows     = sum(tab$Risk_Count),
@@ -4709,216 +4635,556 @@ compute_country_tables <- function(df, country_vec = NULL) {
     )
   }
 
-  list(
-    combined = bind_rows(res_tables),
-    summary  = bind_rows(res_summ)
-  )
+  list(combined = bind_rows(res_tables), summary = bind_rows(res_summ))
 }
 
-# ---- 4) Run: focus countries (plus guard for coverage) ----
-coh_focus <- compute_country_tables(df0, countries_focus)
+# ---- 4) Run for ALL countries ----
+all_countries <- sort(unique(na.omit(df0$Country)))
+coh_all <- compute_country_tables(df0, all_countries)
 
-# Save CSVs
-readr::write_csv(coh_focus$summary, file.path(out_dir, "coherence_summary.csv"))
-readr::write_csv(coh_focus$combined %>% filter(!is.na(SectorType_GGA)),
-                 file.path(out_dir, "gga_risk_vs_action_tables.csv"))
+# ---- 5) Tables (FULL + Top 20 convenience) ----
+readr::write_csv(coh_all$summary, file.path(out_dir, "coherence_summary_ALL.csv"))
+readr::write_csv(coh_all$combined %>% filter(!is.na(SectorType_GGA)),
+                 file.path(out_dir, "gga_risk_vs_action_tables_ALL.csv"))
 
-# ---- 5) Tables in the report ----
 DT::datatable(
-  coh_focus$summary %>% arrange(desc(`Coherence_Score(0-1)`)),
-  options = list(pageLength = 10, autoWidth = TRUE, dom = "tip"),
-  caption = htmltools::HTML("🌐 <b>GGA Coherence — Country Summary</b> (higher is better)")
+  coh_all$summary %>% arrange(desc(`Coherence_Score(0-1)`)),
+  options = list(pageLength = 20, autoWidth = TRUE, dom = "tip"),
+  caption = htmltools::HTML("🌐 <b>GGA Coherence — Country Summary (ALL)</b> (higher is better)")
 )
 
 DT::datatable(
-  coh_focus$combined %>%
-    filter(!is.na(SectorType_GGA)) %>%
+  coh_all$combined %>% filter(!is.na(SectorType_GGA)) %>%
     mutate(across(c(Risk_Share, Action_Share, Delta_Share_Action_minus_Risk), ~round(., 3))),
-  options = list(pageLength = 15, autoWidth = TRUE, dom = "tip"),
-  caption = htmltools::HTML("🔎 <b>Per-theme, per-country table</b> — counts, shares, and deltas")
+  options = list(pageLength = 25, autoWidth = TRUE, dom = "tip"),
+  caption = htmltools::HTML("🔎 <b>Per-theme, per-country table (ALL)</b> — counts, shares, and deltas")
 )
 
-# ---- 6) Figures ----
+# ---- 6) Select Top 20/Top 10 by coherence (for figures) ----
+# ---- 6) Select Top 20 / Top 10 by coherence (canonical order: best -> least) ----
+coh_all_summary <- coh_all$summary %>% arrange(desc(`Coherence_Score(0-1)`))
 
-# 6a) Summary bar: coherence score per country
-p_coh_summary <- coh_focus$summary %>%
-  arrange(`Coherence_Score(0-1)`) %>%
-  mutate(Country = factor(Country, levels = Country)) %>%
-  ggplot(aes(x = Country, y = `Coherence_Score(0-1)`, fill = `Coherence_Score(0-1)`)) +
-  geom_col(width = 0.7, show.legend = FALSE) +
-  coord_flip() +
-  scale_fill_viridis_c(option = "mako") +
-  labs(title = "Coherence between Risk/Impact vs Action/Result (by GGA theme)",
-       x = NULL, y = "Coherence score (0–1)") +
+ord20 <- coh_all_summary %>% slice_head(n = 20) %>% pull(Country)  # best -> least
+ord10 <- coh_all_summary %>% slice_head(n = 10)  %>% pull(Country)  # best -> least
+
+# Convenience table: Top 20 (keeps the same ranking)
+DT::datatable(
+  coh_all_summary %>% filter(Country %in% ord20),
+  options = list(pageLength = 20, autoWidth = TRUE, dom = "tip"),
+  caption = htmltools::HTML("🌐 <b>GGA Coherence — Country Summary (Top 20)</b>")
+)
+
+# ---- 7) FIGURES — ordered best -> least throughout ----
+
+# 7a) Coherence summary bars (Top 20) — top country appears at the top of the chart
+chosen_color <- viridisLite::mako(5)[3]
+
+p_coh_summary_top20 <- coh_all_summary %>%
+  filter(Country %in% ord20) %>%
+  mutate(Country = factor(Country, levels = rev(ord20))) %>%  # reverse because of coord_flip
+  ggplot(aes(x = Country, y = `Coherence_Score(0-1)`)) +
+  geom_col(width = 0.7, fill = chosen_color) +
+  coord_flip(clip = "off") +
+  labs(
+    title = "Coherence between Risk/Impact vs Action/Result (Top 20 countries)",
+    x = NULL, y = "Coherence score (0–1)"
+  ) +
   theme_minimal(base_size = 12)
 
-p_coh_summary
-ggsave(file.path(fig_dir, "coherence_summary.png"), p_coh_summary, width = 7, height = 4, dpi = 300)
+ggsave(file.path(fig_dir, "coherence_summary_top20.png"),
+       p_coh_summary_top20, width = 7.5, height = 6, dpi = 300)
 
-# 6b) Country paired bars: Risk/Impact share vs Action/Result share by theme
+# 7b) Country paired bars (shares) — one PNG per Top 20 country (order of saved files follows ord20)
 plot_country_balance <- function(tab_country) {
   d <- tab_country %>%
     filter(!is.na(SectorType_GGA)) %>%
     select(Country, SectorType_GGA, Risk_Share, Action_Share) %>%
-    pivot_longer(cols = c(Risk_Share, Action_Share),
-                 names_to = "Side", values_to = "Share") %>%
+    tidyr::pivot_longer(c(Risk_Share, Action_Share),
+                        names_to = "Side", values_to = "Share") %>%
     mutate(
-      Side = recode(Side,
-                    Risk_Share   = "Risk/Impact",
-                    Action_Share = "Action/Result"),
-      SectorType_GGA = fct_inorder(SectorType_GGA)
+      Side = dplyr::recode(Side, Risk_Share = "Risk/Impact", Action_Share = "Action/Result"),
+      SectorType_GGA = forcats::fct_inorder(SectorType_GGA)
     )
 
   ggplot(d, aes(x = SectorType_GGA, y = Share, fill = Side)) +
     geom_col(position = "dodge", width = 0.7) +
     coord_flip() +
-scale_fill_viridis_d(option = "mako", begin = 0.2, end = 0.8)+
+    scale_fill_viridis_d(option = "mako", begin = 0.2, end = 0.8) +
     scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
     labs(
       x = NULL, y = "Share within country",
-      title = paste0(unique(d$Country), ": GGA theme balance — Risk/Impact vs Action/Result"),
+      title = paste0(unique(d$Country), ": GGA theme balance — Risk/Impact vs Action/Result (shares)"),
       fill = NULL
     ) +
     theme_minimal(base_size = 12) +
     theme(legend.position = "bottom")
 }
 
-# Draw + save one figure per focus country
 invisible({
-  for (cc in countries_focus) {
-    tabc <- coh_focus$combined %>% filter(Country == cc)
+  for (cc in ord20) {   # preserves best -> least in output listing
+    tabc <- coh_all$combined %>% dplyr::filter(Country == cc)
     if (nrow(tabc)) {
       p <- plot_country_balance(tabc)
-      print(p)
-      ggsave(file.path(fig_dir, paste0(gsub("\\s+", "_", cc), "_gga_balance.png")),
+      ggsave(file.path(fig_dir, paste0(gsub("\\s+", "_", cc), "_gga_balance_top20.png")),
              p, width = 8.5, height = 5.5, dpi = 300)
     }
   }
 })
 
-# 6c) Delta heatmap: Action share − Risk share
-# Data (unchanged)
-heat_df <- coh_focus$combined %>%
-  filter(!is.na(SectorType_GGA)) %>%
-  mutate(
-    SectorType_GGA = factor(SectorType_GGA, levels = themes),
-    Country        = factor(Country, levels = countries_focus)
+# 7c) Stacked ABSOLUTE counts (Top 10) — two bars per country, best -> least, custom labels
+stack_abs_top10 <- coh_all$combined %>%
+  dplyr::filter(!is.na(SectorType_GGA), Country %in% ord10) %>%
+  dplyr::select(Country, SectorType_GGA, Risk_Count, Action_Count) %>%
+  tidyr::pivot_longer(c(Risk_Count, Action_Count),
+                      names_to = "Side", values_to = "Count") %>%
+  dplyr::mutate(
+    Side = dplyr::recode(Side, Risk_Count = "Risk/Impact", Action_Count = "Action/Result"),
+    Country = factor(Country, levels = ord10),                      # enforce best -> least
+    SectorType_GGA = factor(SectorType_GGA, levels = themes)
   )
 
-# Symmetric limits around zero
-lim <- max(abs(heat_df$Delta_Share_Action_minus_Risk), na.rm = TRUE)
+# Build "Country | Side" factor in the exact order: Country1|Risk, Country1|Action, ...
+order_df <- tidyr::crossing(
+  Country = ord10,
+  Side    = c("Risk/Impact","Action/Result")
+) %>% dplyr::mutate(CountrySide = paste(Country, Side, sep = " | "))
+levels_CS <- order_df$CountrySide
 
-p_heat <- ggplot(
-  heat_df,
+stack_abs_top10 <- stack_abs_top10 %>%
+  dplyr::mutate(CountrySide = factor(paste(Country, Side, sep = " | "), levels = levels_CS))
+
+# Palette
+okabe_ito <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442",
+               "#0072B2", "#D55E00", "#CC79A7", "#999999")
+
+# Positions for centered country labels and diagonal side labels
+bar_totals <- stack_abs_top10 %>% dplyr::group_by(CountrySide) %>%
+  dplyr::summarise(Total = sum(Count), .groups = "drop")
+
+x_levels <- levels(stack_abs_top10$CountrySide)
+x_idx    <- setNames(seq_along(x_levels), x_levels)
+
+pos_df <- tidyr::separate(
+  data.frame(CountrySide = x_levels),
+  col = CountrySide, into = c("Country","Side"), sep = " \\| ", remove = FALSE
+) %>% dplyr::mutate(x = x_idx[CountrySide])
+
+country_mid <- pos_df %>% dplyr::group_by(Country) %>%
+  dplyr::summarise(x_mid = mean(x), .groups = "drop")
+
+y_max     <- max(bar_totals$Total, na.rm = TRUE)
+y_country <- -0.01 * y_max   # country label line (below 0 but no negative tick marks)
+y_side    <- -0.15 * y_max   # side label line
+
+p_stack_abs_top10_twoBars <- ggplot(
+  stack_abs_top10,
+  aes(x = CountrySide, y = Count, fill = SectorType_GGA)
+) +
+  geom_col(width = 0.78) +
+  scale_y_continuous(labels = scales::comma, expand = expansion(mult = c(0, 0.06))) +
+  coord_cartesian(ylim = c(-50, NA), clip = "off") +  # draw labels below axis without negative ticks
+  scale_x_discrete(labels = rep("", length(x_levels))) +  # hide defaults; we add custom text
+  scale_fill_manual(
+    values = okabe_ito[seq_len(min(length(okabe_ito), nlevels(stack_abs_top10$SectorType_GGA)))],
+    name = "GGA theme"
+  ) +
+  labs(
+    title = "Action vs Risk",
+    x = NULL, y = "Number of records"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.major.x = element_blank(),
+    legend.position    = "right",
+    legend.title       = element_text(size = 9, face = "bold"),
+    legend.text        = element_text(size = 8),
+    plot.title         = element_text(face = "bold"),
+    axis.text.x        = element_text(size = 9),
+    plot.margin        = margin(10, 20, 54, 10)
+  ) +
+  # centered country label between the two bars
+  geom_text(
+    data = country_mid,
+    aes(x = x_mid, y = y_country, label = Country),
+    inherit.aes = FALSE, vjust = 1, fontface = "bold", size = 5
+  ) +
+  # diagonal share-type labels under each bar (centered on each bar)
+  geom_text(
+    data = pos_df,
+    aes(x = x, y = y_side, label = Side),
+    inherit.aes = FALSE, angle = 60, vjust = 0.5, hjust = 0.5, size = 4
+  )
+
+p_stack_abs_top10_twoBars
+
+ggsave(file.path(fig_dir, "country_stacked_bars_counts_top10_twoBars.png"),
+       p_stack_abs_top10_twoBars, width = 12.5, height = 6.5, dpi = 300)
+
+# 7d) Delta heatmap (Top 20) — y-axis ordered best -> least (South Africa first)
+heat_df_top20 <- coh_all$combined %>%
+  dplyr::filter(!is.na(SectorType_GGA), Country %in% ord20) %>%
+  dplyr::mutate(
+    SectorType_GGA = factor(SectorType_GGA, levels = themes),
+    Country        = factor(Country, levels = ord20)   # best -> least on y
+  )
+
+lim_top <- max(abs(heat_df_top20$Delta_Share_Action_minus_Risk), na.rm = TRUE)
+
+p_heat_top20 <- ggplot(
+  heat_df_top20,
   aes(x = SectorType_GGA, y = Country, fill = Delta_Share_Action_minus_Risk)
 ) +
   geom_tile() +
   scale_fill_distiller(
     type = "div", palette = "RdBu",
-    limits = c(-lim, lim),
+    limits = c(-lim_top, lim_top),
     oob = scales::squish,
     labels = scales::percent_format(accuracy = 1),
     guide = guide_colorbar(
       title = "Action share − Risk share",
       title.position = "top",
       direction = "vertical",
-      barwidth  = unit(6,  "pt"),
-      barheight = unit(70, "pt"),
+      barwidth  = grid::unit(6,  "pt"),
+      barheight = grid::unit(70, "pt"),
       ticks = TRUE
     )
   ) +
   labs(
-    title   = "Theme balance: Action share minus Risk share",
-    subtitle = "Red = actions over-represented vs. risks; Blue = risks over-represented vs. actions.\nValues show the difference in each theme’s share (Action − Risk).",
+    title    = "Theme balance: Action share minus Risk share (Top 20 countries)",
+    subtitle = "Red = actions over-represented vs risks; Blue = risks over-represented vs actions.\nDifference is Action share − Risk share within country.",
     x = NULL, y = NULL
   ) +
-  theme_minimal(base_size = 12) +
+  theme_minimal(base_size = 14) +
   theme(
     axis.text.x      = element_text(angle = 35, hjust = 1),
     legend.position  = "right",
     legend.title     = element_text(size = 9, face = "bold"),
     legend.text      = element_text(size = 8),
-    legend.margin    = margin(l = 4, r = 4, t = 4, b = 4),
+    legend.margin    = margin(4, 4, 4, 4),
     plot.subtitle    = element_text(size = 10, margin = margin(b = 6))
   )
 
-p_heat
-ggsave(file.path(fig_dir, "delta_heatmap.png"), p_heat, width = 9.5, height = 4.8, dpi = 300)
+p_heat_top20
 
-# 6f) Stacked shares by side (two bars per country), with compact right legend
-# 6f-alt) Stacked **absolute** counts by side (two bars per country)
 
-stack_abs <- coh_focus$combined %>%
-  dplyr::filter(!is.na(SectorType_GGA)) %>%
-  dplyr::select(Country, SectorType_GGA, Risk_Count, Action_Count) %>%
-  tidyr::pivot_longer(c(Risk_Count, Action_Count),
-                      names_to = "Side", values_to = "Count") %>%
-  dplyr::mutate(
-    Side = dplyr::recode(Side,
-                         Risk_Count   = "Risk/Impact",
-                         Action_Count = "Action/Result"),
-    Country        = factor(Country, levels = countries_focus),
-    SectorType_GGA = factor(SectorType_GGA, levels = themes)
-  )
+ggsave(file.path(fig_dir, "delta_heatmap_top20.png"),
+       p_heat_top20, width = 9.5, height = 6.5, dpi = 300)
 
-# Colorblind-friendly palette
-okabe_ito <- c(
-  "#E69F00", "#56B4E9", "#009E73", "#F0E442",
-  "#0072B2", "#D55E00", "#CC79A7", "#999999"
+# ---- 8) Notes in the console / knit log ----
+cat("\nSaved coherence outputs to:\n",
+    file.path(out_dir, "coherence_summary_ALL.csv"), "\n",
+    file.path(out_dir, "gga_risk_vs_action_tables_ALL.csv"), "\n",
+    file.path(fig_dir, "coherence_summary_top20.png"), "\n",
+    file.path(fig_dir, "country_stacked_bars_counts_top10_twoBars.png"), "\n",
+    file.path(fig_dir, "delta_heatmap_top20.png"), "\n", sep = "")
+
+invisible({
+  for (cc in ord20) {
+    fp <- file.path(fig_dir, paste0(gsub("\\s+", "_", cc), "_gga_balance_top20.png"))
+    if (file.exists(fp)) cat(fp, "\n")
+  }
+})
+
+
+```
+
+### Glossary — Global theme ranking (Δ = Action share − Risk share)
+
+- **Rank** — Order by **mean Δ** (highest = most over-represented).
+- **Theme (GGA)** — GGA theme name.
+- **Direction** — Over / Under / Near-balanced (by sign of mean Δ).
+- **Mean Δ (Action−Risk)** — Average across countries of *(Action share − Risk share)* for the theme.
+- **Median Δ** — Median of Δ across countries (robust to outliers).
+- **Avg Risk share** — Country-average **Risk/Impact** share for the theme  
+  *(per-country, Risk shares sum to 1)*.
+- **Avg Action share** — Country-average **Action/Result** share for the theme  
+  *(per-country, Action shares sum to 1)*.
+- **# Over (≥ +5pp)** — Count of countries with Δ ≥ 0.05.
+- **# Under (≤ −5pp)** — Count of countries with Δ ≤ −0.05.
+- **# Near** — Count with −0.05 < Δ < +0.05.
+- **Share Over / Share Under** — Fractions of countries in over/under buckets.
+- **Countries counted** — Number of country × theme observations included.
+
+```{r,echo=FALSE}
+# =========================
+# Step 10b (GLOBAL): Overall ranking of themes by Action − Risk (Δ)
+# =========================
+# Produces ONE explicit ranking table (most over-represented → most under-represented),
+# averaged ACROSS COUNTRIES, with clear counts/shares of over/under occurrences.
+# Uses coh_all$combined from Step 10 (row = country × theme), or falls back to CSV.
+
+suppressPackageStartupMessages({
+  library(dplyr); library(tidyr); library(readr); library(DT); library(scales)
+})
+
+# -------- Inputs & paths --------
+ins_dir <- file.path(out_dir, "insights_global")
+dir.create(ins_dir, recursive = TRUE, showWarnings = FALSE)
+
+combined_tbl <- tryCatch(
+  {
+    stopifnot(exists("coh_all"))
+    coh_all$combined %>% filter(!is.na(SectorType_GGA))
+  },
+  error = function(e) {
+    readr::read_csv(
+      file.path(out_dir, "gga_risk_vs_action_tables_ALL.csv"),
+      show_col_types = FALSE
+    ) %>% filter(!is.na(SectorType_GGA))
+  }
 )
 
-p_stack_abs <- ggplot(stack_abs, aes(x = Side, y = Count, fill = SectorType_GGA)) +
-  geom_col(width = 0.74) +
-  facet_wrap(~ Country, nrow = 1) +
-  scale_y_continuous(labels = scales::comma) +
-  scale_fill_manual(values = okabe_ito[seq_len(nlevels(stack_abs$SectorType_GGA))],
-                    name = "GGA theme") +
-  labs(
-    title    = "Action vs Risk by country — absolute stacked counts",
-    subtitle = if (USE_RESULT_WEIGHTS) {
-      "Bars show weighted counts (Action/Result uses effectiveness weights); colors are GGA themes."
-    } else {
-      "Bars show raw counts; colors are GGA themes."
-    },
-    x = NULL, y = "Number of records"
-  ) +
-  theme_minimal(base_size = 12) +
-  theme(
-    panel.grid.major.x = element_blank(),
-    axis.text.x        = element_text(size = 10),
-    axis.text.y        = element_text(size = 10),
-    strip.text         = element_text(face = "bold"),
-    legend.position    = "right",
-    legend.title       = element_text(size = 9, face = "bold"),
-    legend.text        = element_text(size = 8),
-    legend.margin      = margin(2, 2, 2, 2),
-    legend.box.margin  = margin(0, 6, 0, 6)
-  ) +
-  guides(
-    fill = guide_legend(
-      title.position = "top",
-      ncol = 1,
-      keyheight = unit(10, "pt"),
-      keywidth  = unit(16, "pt")
+# -------- Parameters --------
+THR_GAP <- 0.05     # threshold to count "over/under" (±5 percentage points of within-country share)
+WEIGHTED <- FALSE   # FALSE = equal-country averaging; TRUE = weight by (Risk_Count + Action_Count)
+
+# -------- Ensure one row per country × theme --------
+per_cty_theme <- combined_tbl %>%
+  select(
+    Country, SectorType_GGA,
+    Risk_Share, Action_Share,
+    Delta_Share_Action_minus_Risk,
+    Risk_Count, Action_Count
+  ) %>%
+  distinct()
+
+# -------- GLOBAL aggregation across countries --------
+if (!WEIGHTED) {
+  theme_global <- per_cty_theme %>%
+    group_by(SectorType_GGA) %>%
+    summarise(
+      mean_delta   = mean(Delta_Share_Action_minus_Risk, na.rm = TRUE),
+      median_delta = median(Delta_Share_Action_minus_Risk, na.rm = TRUE),
+      mean_risk    = mean(Risk_Share,   na.rm = TRUE),
+      mean_action  = mean(Action_Share, na.rm = TRUE),
+      over_n       = sum(Delta_Share_Action_minus_Risk >=  THR_GAP, na.rm = TRUE),
+      under_n      = sum(Delta_Share_Action_minus_Risk <= -THR_GAP, na.rm = TRUE),
+      countries_n  = n(),
+      .groups = "drop"
     )
+} else {
+  theme_global <- per_cty_theme %>%
+    mutate(weight = pmax(Risk_Count + Action_Count, 1)) %>%
+    group_by(SectorType_GGA) %>%
+    summarise(
+      mean_delta   = weighted.mean(Delta_Share_Action_minus_Risk, w = weight, na.rm = TRUE),
+      median_delta = median(Delta_Share_Action_minus_Risk, na.rm = TRUE),
+      mean_risk    = weighted.mean(Risk_Share,   w = weight, na.rm = TRUE),
+      mean_action  = weighted.mean(Action_Share, w = weight, na.rm = TRUE),
+      over_n       = sum(Delta_Share_Action_minus_Risk >=  THR_GAP, na.rm = TRUE),
+      under_n      = sum(Delta_Share_Action_minus_Risk <= -THR_GAP, na.rm = TRUE),
+      countries_n  = n(),
+      .groups = "drop"
+    )
+}
+
+# -------- Build explicit ranking table --------
+rank_table <- theme_global %>%
+  mutate(
+    near_n       = countries_n - over_n - under_n,
+    over_share   = over_n  / countries_n,
+    under_share  = under_n / countries_n,
+    near_share   = near_n  / countries_n,
+    Direction    = case_when(
+      mean_delta >  0 ~ "Over-represented by actions",
+      mean_delta <  0 ~ "Under-represented by actions",
+      TRUE            ~ "Near-balanced"
+    )
+  ) %>%
+  arrange(desc(mean_delta)) %>%
+  mutate(
+    Rank = row_number()
+  ) %>%
+  select(
+    Rank,
+    `Theme (GGA)` = SectorType_GGA,
+    Direction,
+    `Mean Δ (Action−Risk)`   = mean_delta,
+    `Median Δ`               = median_delta,
+    `Avg Risk share`         = mean_risk,
+    `Avg Action share`       = mean_action,
+    `# Over (≥+5pp)`         = over_n,
+    `# Under (≤−5pp)`        = under_n,
+    `# Near`                 = near_n,
+    `Share Over`             = over_share,
+    `Share Under`            = under_share,
+    `Countries counted`      = countries_n
   )
 
-p_stack_abs
-ggsave(file.path(fig_dir, "country_stacked_bars_counts.png"),
-       p_stack_abs, width = 10, height = 4.2, dpi = 300)
+# -------- Save CSV --------
+out_csv <- file.path(ins_dir, "global_theme_ranking_ActionMinusRisk.csv")
+readr::write_csv(rank_table, out_csv)
+
+# -------- Console summary --------
+cat("\n=== GLOBAL THEME RANKING (Action − Risk) ===\n",
+    "Averaging across countries: ", ifelse(WEIGHTED, "RECORD-WEIGHTED", "EQUAL-COUNTRY"), "\n",
+    "Threshold for over/under counts: ±", THR_GAP*100, " pp\n",
+    "Saved table: ", out_csv, "\n\n", sep = "")
+
+# -------- Highly explicit DT table (rounded & color-coded Δ) --------
+rank_table_dt <- rank_table %>%
+  mutate(
+    `Mean Δ (Action−Risk)` = round(`Mean Δ (Action−Risk)`, 3),
+    `Median Δ`             = round(`Median Δ`, 3),
+    `Avg Risk share`       = percent(`Avg Risk share`, accuracy = 0.1),
+    `Avg Action share`     = percent(`Avg Action share`, accuracy = 0.1),
+    `Share Over`           = percent(`Share Over`, accuracy = 0.1),
+    `Share Under`          = percent(`Share Under`, accuracy = 0.1)
+  )
+
+dt <- datatable(
+  rank_table_dt,
+  options = list(pageLength = 10, dom = "tip", order = list(list(0, 'asc'))),
+  caption = htmltools::HTML(
+    paste0("🌍 <b>Global theme ranking</b> — Δ = Action share − Risk share (",
+           ifelse(WEIGHTED, "record-weighted", "equal-country"),
+           "; threshold = ±", THR_GAP*100, "pp for over/under counts)")
+  ),
+  rownames = FALSE
+)
+
+# Color-code Δ column: green for positive, blue for ~0, red for negative
+dt <- formatStyle(
+  dt, "Mean Δ (Action−Risk)",
+  background = styleColorBar(c(min(rank_table$`Mean Δ (Action−Risk)`),
+                               max(rank_table$`Mean Δ (Action−Risk)`)), '#a6cee3'),
+  color = styleInterval(c(-1e-9, 1e-9), c('#b22222', '#333333', '#1b5e20'))
+)
+
+dt
+
+```
 
 
-# ---- 7) Notes in the console / knit log ----
-cat("\nSaved coherence outputs to:\n",
-    file.path(out_dir, "coherence_summary.csv"), "\n",
-    file.path(out_dir, "gga_risk_vs_action_tables.csv"), "\n",
-    file.path(fig_dir, "coherence_summary.png"), "\n",
-    file.path(fig_dir, "delta_heatmap.png"), "\n",
-    file.path(fig_dir, "country_stacked_bars_facet.png"), "\n", sep = "")
-for (cc in countries_focus) {
-  fp <- file.path(fig_dir, paste0(gsub("\\s+", "_", cc), "_gga_balance.png"))
-  if (file.exists(fp)) cat(fp, "\n")
+```{r}
+# =========================
+# Step 10b (GLOBAL): Which themes are most under/over-represented?
+# =========================
+# Goal: Aggregate ACROSS COUNTRIES to find the globally under/over-represented themes.
+# Uses coh_all$combined from Step 10 (one row per country × theme with shares & delta).
+# Falls back to the CSVs saved in Step 10 if 'coh_all' isn't in memory.
+
+suppressPackageStartupMessages({
+  library(dplyr); library(tidyr); library(readr); library(DT)
+})
+
+# -------- Inputs & paths --------
+ins_dir <- file.path(out_dir, "insights_global")
+dir.create(ins_dir, recursive = TRUE, showWarnings = FALSE)
+
+combined_tbl <- tryCatch(
+  {
+    stopifnot(exists("coh_all"))
+    coh_all$combined %>% filter(!is.na(SectorType_GGA))
+  },
+  error = function(e) {
+    readr::read_csv(
+      file.path(out_dir, "gga_risk_vs_action_tables_ALL.csv"),
+      show_col_types = FALSE
+    ) %>% filter(!is.na(SectorType_GGA))
+  }
+)
+
+# -------- Parameters --------
+# Threshold for counting "over/under" occurrences (in share points)
+THR_GAP <- 0.05  # = 5 percentage points of within-country share
+
+# Optional: equal-weight countries (default) vs. weight by counts.
+# If you prefer record-weighted averaging across countries, set WEIGHTED = TRUE
+WEIGHTED <- FALSE
+
+# -------- Prep: per-country theme rows --------
+# Ensure we have exactly one row per Country × Theme with shares and delta
+per_cty_theme <- combined_tbl %>%
+  select(
+    Country, SectorType_GGA,
+    Risk_Share, Action_Share,
+    Delta_Share_Action_minus_Risk,
+    Risk_Count, Action_Count
+  ) %>%
+  distinct()
+
+# -------- GLOBAL aggregation across countries --------
+if (!WEIGHTED) {
+  # Equal-country averaging (default)
+  theme_global <- per_cty_theme %>%
+    group_by(SectorType_GGA) %>%
+    summarise(
+      mean_delta   = mean(Delta_Share_Action_minus_Risk, na.rm = TRUE),
+      median_delta = median(Delta_Share_Action_minus_Risk, na.rm = TRUE),
+      mean_risk    = mean(Risk_Share,   na.rm = TRUE),
+      mean_action  = mean(Action_Share, na.rm = TRUE),
+      over_n       = sum(Delta_Share_Action_minus_Risk >=  THR_GAP, na.rm = TRUE),
+      under_n      = sum(Delta_Share_Action_minus_Risk <= -THR_GAP, na.rm = TRUE),
+      countries_n  = n(),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      near_n      = countries_n - over_n - under_n,
+      rank_over   = rank(-mean_delta, ties.method = "min"),
+      rank_under  = rank( mean_delta, ties.method = "min")
+    ) %>%
+    arrange(desc(mean_delta))
+} else {
+  # Record-weighted averaging across countries
+  theme_global <- per_cty_theme %>%
+    mutate(weight = pmax(Risk_Count + Action_Count, 1)) %>%
+    group_by(SectorType_GGA) %>%
+    summarise(
+      mean_delta   = weighted.mean(Delta_Share_Action_minus_Risk, w = weight, na.rm = TRUE),
+      median_delta = median(Delta_Share_Action_minus_Risk, na.rm = TRUE),
+      mean_risk    = weighted.mean(Risk_Share,   w = weight, na.rm = TRUE),
+      mean_action  = weighted.mean(Action_Share, w = weight, na.rm = TRUE),
+      over_n       = sum(Delta_Share_Action_minus_Risk >=  THR_GAP, na.rm = TRUE),
+      under_n      = sum(Delta_Share_Action_minus_Risk <= -THR_GAP, na.rm = TRUE),
+      countries_n  = n(),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      near_n      = countries_n - over_n - under_n,
+      rank_over   = rank(-mean_delta, ties.method = "min"),
+      rank_under  = rank( mean_delta, ties.method = "min")
+    ) %>%
+    arrange(desc(mean_delta))
 }
+
+# -------- Key outputs for the report --------
+# 1) Global ranking: most over- vs under-represented themes (by average Δ)
+most_over  <- theme_global %>% arrange(desc(mean_delta)) %>% slice_head(n = 3)
+most_under <- theme_global %>% arrange(mean_delta)        %>% slice_head(n = 3)
+
+# 2) Clean, rounded overview table
+theme_global_out <- theme_global %>%
+  mutate(
+    across(c(mean_delta, median_delta, mean_risk, mean_action), ~round(., 3))
+  ) %>%
+  arrange(desc(mean_delta))
+
+# -------- Save & display --------
+readr::write_csv(theme_global_out, file.path(ins_dir, "theme_global_overview.csv"))
+readr::write_csv(most_over,        file.path(ins_dir, "themes_most_overrepresented.csv"))
+readr::write_csv(most_under,       file.path(ins_dir, "themes_most_underrepresented.csv"))
+
+cat("\n=== GLOBAL THEME BALANCE (Action − Risk) ===\n",
+    "Averaging across countries (", ifelse(WEIGHTED, "RECORD-WEIGHTED", "EQUAL-COUNTRY"), "):\n",
+    "Top over-represented themes (by mean Δ):\n", sep = "")
+
+print(most_over %>% select(SectorType_GGA, mean_delta, median_delta, over_n, under_n, countries_n))
+
+cat("\nTop under-represented themes (by mean Δ):\n")
+print(most_under %>% select(SectorType_GGA, mean_delta, median_delta, over_n, under_n, countries_n))
+
+cat("\nFull table written to: ", file.path(ins_dir, "theme_global_overview.csv"), "\n", sep = "")
+
+DT::datatable(
+  theme_global_out,
+  options = list(pageLength = 10, dom = "tip"),
+  caption = htmltools::HTML(
+    paste0("🌍 <b>Global theme balance</b> — Δ = Action share − Risk share (THR = ",
+           THR_GAP * 100, " pp; averaging = ",
+           ifelse(WEIGHTED, "record-weighted", "equal-country"), ")")
+  )
+)
 
 ```
 
