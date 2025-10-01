@@ -1273,6 +1273,26 @@ ggplot(sector_counts_subset, aes(x = Element, y = rows_with_sector, fill = Eleme
 
 adaptdata<-read.csv("data/adaptdata_results_nano6.csv")
 
+region_key <- overview %>%
+  select(Country, Region) %>%
+  distinct()
+
+manual_add <- tibble::tribble(
+  ~Country,      ~Region,
+  "Moldova",     "Eastern Europe",
+  "Phillipines", "Asia-Pacific",   # (kept your spelling)
+  "Russia",      "Eastern Europe",
+  "Türkiye",     "Asia-Pacific",
+  "USA",         "Western Europe and Other states"
+)
+
+region_key <- region_key %>%
+  bind_rows(manual_add) %>%
+  distinct()
+
+adaptdata_with_region <- adaptdata %>%
+  left_join(region_key, by = "Country")
+
 # --- Define fixed orders ---
 theme_order <- c(
   "Water and sanitation",
@@ -1285,39 +1305,27 @@ theme_order <- c(
   "NA"
 )
 
-element_order <- c(
-  "Action",
-  "Hazard",
-  "System at risk",
-  "Climate impact",
-  "Adaptation priorities",
-  "Result",
-  "Indicator",
-  "Barriers"
-)
 
-# --- Aggregate data with fixed factor levels ---
-theme_counts_all <- adaptdata %>%
-  filter(Element!="NA")%>%
-  group_by(Element, SectorType_GGA) %>%
-  summarise(n = n(), .groups = "drop") %>%
+
+
+# --- Counts per Theme x Region ---
+theme_counts_by_region <- adaptdata_with_region %>%
+  filter(Element != "NA") %>%                             # keep if you still want to exclude NA Element rows
   mutate(
     SectorType_GGA = factor(SectorType_GGA, levels = theme_order, ordered = TRUE),
-    Element        = factor(Element, levels = element_order, ordered = TRUE)
-  )
+    Region = if_else(is.na(Region) | Region == "", "Unknown", Region)
+  ) %>%
+  count(SectorType_GGA, Region, name = "n")
 
-theme_counts_all <- theme_counts_all %>%
-  mutate(Element = factor(Element, levels = element_order, ordered = TRUE))
-
-
-# --- Dodged version ---
-ggplot(theme_counts_all, aes(x = SectorType_GGA, y = n, fill = Element)) +
-  geom_col(position = "dodge") +
-  scale_fill_brewer(palette = "Paired") +   # or choose a fixed palette
+# --- Stacked bars: Themes with Regions inside ---
+ggplot(theme_counts_by_region, aes(x = SectorType_GGA, y = n, fill = Region)) +
+  geom_col() +
+  scale_fill_viridis_d(option = "plasma", name = "Region") +
   labs(
-    title = "Themes covered across all Elements",
+    title = "Themes covered across all Elements by Region",
     x = "Theme",
-    y = "Count"
+    y = "Count",
+    fill = "Region"
   ) +
   scale_x_discrete(labels = function(x) stringr::str_wrap(x, width = 15)) +
   theme_minimal() +
@@ -1327,15 +1335,6 @@ ggplot(theme_counts_all, aes(x = SectorType_GGA, y = n, fill = Element)) +
     legend.key.size = unit(0.8, "lines")
   ) +
   guides(fill = guide_legend(nrow = 2, byrow = TRUE))
-
-# --- Stacked version ---
-ggplot(theme_counts_all, aes(x = SectorType_GGA, y = n)) +
-  geom_col(fill = "#377EB8") +
-  labs(title = "Themes covered across all Elements", x = "Theme", y = "Count") +
-  scale_x_discrete(labels = function(x) stringr::str_wrap(x, width = 15)) +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 30, hjust = 1))
-
 
 
 ```
