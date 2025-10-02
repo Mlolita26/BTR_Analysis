@@ -289,9 +289,27 @@ hazard_plot
 by regions 
 
 ```{r,echo=FALSE}
+
+# ---- Region key (with manual fixes) ----
 region_key <- overview %>%
   select(Country, Region) %>%
   distinct()
+
+manual_add <- tibble::tribble(
+  ~Country,      ~Region,
+  "Moldova",     "Eastern Europe",
+  "Phillipines", "Asia-Pacific",   # (kept your spelling)
+  "Russia",      "Eastern Europe",
+  "Türkiye",     "Asia-Pacific",
+  "USA",         "Western Europe and Other states"
+)
+
+region_key <- region_key %>%
+  bind_rows(manual_add) %>%
+  distinct()
+
+adaptdata_with_region <- adaptdata %>%
+  left_join(region_key, by = "Country")
 
 # add manual fixes for missing countries
 manual_add <- tibble::tribble(
@@ -303,14 +321,7 @@ manual_add <- tibble::tribble(
   "USA",           "Western Europe and Other states"
 )
 
-# combine with existing region_key
-region_key <- region_key %>%
-  bind_rows(manual_add) %>%
-  distinct()
 
-
-adaptdata_with_region <- adaptdata %>%
-  left_join(region_key, by = "Country")
 
 hazard_counts <- adaptdata_with_region %>%
   filter(Element == "Hazard") %>%
@@ -1271,7 +1282,12 @@ ggplot(sector_counts_subset, aes(x = Element, y = rows_with_sector, fill = Eleme
 
 ```{r,echo=FALSE}
 
-adaptdata<-read.csv("data/adaptdata_results_nano6.csv")
+library(dplyr)
+library(ggplot2)
+library(scales)
+library(stringr)
+
+adaptdata <- read.csv("data/adaptdata_results_nano6.csv")
 
 region_key <- overview %>%
   select(Country, Region) %>%
@@ -1280,7 +1296,7 @@ region_key <- overview %>%
 manual_add <- tibble::tribble(
   ~Country,      ~Region,
   "Moldova",     "Eastern Europe",
-  "Phillipines", "Asia-Pacific",   # (kept your spelling)
+  "Phillipines", "Asia-Pacific",
   "Russia",      "Eastern Europe",
   "Türkiye",     "Asia-Pacific",
   "USA",         "Western Europe and Other states"
@@ -1293,7 +1309,7 @@ region_key <- region_key %>%
 adaptdata_with_region <- adaptdata %>%
   left_join(region_key, by = "Country")
 
-# --- Define fixed orders ---
+# --- Fixed order (renamed NA-like -> "Not specific to a theme") ---
 theme_order <- c(
   "Water and sanitation",
   "Food and agriculture",
@@ -1302,29 +1318,86 @@ theme_order <- c(
   "Infrastructure and human settlements",
   "Poverty eradication and livelihoods",
   "Cultural heritage",
-  "NA"
+  "Not specific to a theme"
 )
-
-
-
 
 # --- Counts per Theme x Region ---
 theme_counts_by_region <- adaptdata_with_region %>%
-  filter(Element != "NA") %>%                             # keep if you still want to exclude NA Element rows
+  filter(Element != "NA") %>%
   mutate(
+    SectorType_GGA = dplyr::case_when(
+      is.na(SectorType_GGA) ~ "Not specific to a theme",
+      trimws(SectorType_GGA) %in% c("NA", "N/A") ~ "Not specific to a theme",
+      TRUE ~ SectorType_GGA
+    ),
     SectorType_GGA = factor(SectorType_GGA, levels = theme_order, ordered = TRUE),
     Region = if_else(is.na(Region) | Region == "", "Unknown", Region)
   ) %>%
   count(SectorType_GGA, Region, name = "n")
 
-# --- Stacked bars: Themes with Regions inside ---
-ggplot(theme_counts_by_region, aes(x = SectorType_GGA, y = n, fill = Region)) +
+# --- Inside-stack labels (same logic as before) ---
+theme_counts_by_region_lbl <- theme_counts_by_region %>%
+  group_by(SectorType_GGA) %>%
+  mutate(
+    pct   = n / sum(n),
+    label = if_else(pct >= 0.06, scales::percent(pct, accuracy = 1), "")
+  ) %>%
+  ungroup()
+
+labels_df <- theme_counts_by_region_lbl %>%
+  group_by(SectorType_GGA) %>%
+  mutate(pct_calc = n / sum(n)) %>%
+  ungroup() %>%
+  mutate(
+    label2 = dplyr::case_when(
+      SectorType_GGA == "Cultural heritage" ~ "",  # hide
+      SectorType_GGA == "Not specific to a theme" ~ scales::percent(pct_calc, accuracy = 1), # always show
+      TRUE ~ label
+    ),
+    label_size = if_else(
+      SectorType_GGA %in% c("Health", "Poverty eradication and livelihoods"),
+      2, 3
+    )
+  ) %>%
+  filter(label2 != "")
+
+# --- Top-of-bar % of TOTAL (right-axis ties to this) ---
+bar_tops <- theme_counts_by_region %>%
+  group_by(SectorType_GGA) %>%
+  summarise(total_n = sum(n), .groups = "drop") %>%
+  mutate(pct_total = total_n / sum(total_n),
+         top_label = percent(pct_total, accuracy = 1))
+
+total_all <- sum(bar_tops$total_n)
+
+# --- Plot ---
+ggplot(theme_counts_by_region_lbl,
+       aes(x = SectorType_GGA, y = n, fill = Region)) +
   geom_col() +
+  # inside-the-stack labels
+  geom_text(
+    data = labels_df,
+    aes(label = label2, size = label_size),
+    position = position_stack(vjust = 0.5)
+  ) +
+  scale_size_identity(guide = "none") +
+  # top-of-bar % of total
+  geom_text(
+    data = bar_tops,
+    aes(x = SectorType_GGA, y = total_n, label = top_label),
+    vjust = -0.3, fontface = "bold", size = 3.2, inherit.aes = FALSE
+  ) +
   scale_fill_viridis_d(option = "plasma", name = "Region") +
+  scale_y_continuous(
+    name = "Number of data points",
+    sec.axis = sec_axis(~ . / total_all,
+                        labels = percent_format(accuracy = 1),
+                        name = "Share of all extracted information"),
+    expand = expansion(mult = c(0.02, 0.12)) # headroom for top labels
+  ) +
   labs(
     title = "Themes covered across all Elements by Region",
     x = "Theme",
-    y = "Count",
     fill = "Region"
   ) +
   scale_x_discrete(labels = function(x) stringr::str_wrap(x, width = 15)) +
@@ -1332,7 +1405,8 @@ ggplot(theme_counts_by_region, aes(x = SectorType_GGA, y = n, fill = Region)) +
   theme(
     axis.text.x = element_text(angle = 30, hjust = 1),
     legend.position = "bottom",
-    legend.key.size = unit(0.8, "lines")
+    legend.key.size = unit(0.8, "lines"),
+    plot.margin = margin(5.5, 12, 5.5, 5.5)
   ) +
   guides(fill = guide_legend(nrow = 2, byrow = TRUE))
 
