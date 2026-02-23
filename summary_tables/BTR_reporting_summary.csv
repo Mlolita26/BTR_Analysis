@@ -1,0 +1,7 @@
+region_un,total_countries,countries_with_data,coverage_prop,min_points,max_points,avg_points
+Global,241,96,0.3983402489626556,11,464,118.98958333333333
+Africa,61,17,0.2786885245901639,NA,NA,NA
+Americas,52,19,0.36538461538461536,NA,NA,NA
+Asia,53,21,0.39622641509433965,NA,NA,NA
+Europe,50,33,0.66,NA,NA,NA
+Oceania,25,4,0.16,NA,NA,NA
