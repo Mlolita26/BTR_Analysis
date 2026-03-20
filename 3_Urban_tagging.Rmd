@@ -7,6 +7,7 @@ output: html_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 ```
+
 ```{r libraries}
 library(googledrive)
 library(readxl)
@@ -221,4 +222,369 @@ summary<- adaptdata_classified %>%
     Built_Environment      = sum(built_environment      == "Yes", na.rm = TRUE),
     Human_Settlement       = sum(human_settlement       == "Yes", na.rm = TRUE)
   )
+```
+```{r results for who and how}
+
+
+# ---- Read data ----
+urban_data_classified <- read_excel("data/urban_relevance_classified.xlsx")
+
+# ---- Filter: urban relevant + Element == Result, remove NA ElementText ----
+result_data <- urban_data_classified %>%
+  filter(urban_relevant == "Yes") %>%
+  filter(Element == "Result") %>%
+  filter(!is.na(ElementText) & str_trim(ElementText) != "" & ElementText != "NA")
+
+cat("Rows to classify:", nrow(result_data), "\n")
+
+# ---- API Setup ----
+OPENAI_API_KEY <- Sys.getenv("OPENAI_API_KEY")
+stopifnot(nzchar(OPENAI_API_KEY))
+GPT_MODEL  <- "gpt-4o-mini"
+MAX_TOKENS <- 2000
+
+# ---- Read data ----
+urban_data_classified <- read_excel("data/urban_relevance_classified.xlsx")
+
+# ---- Filter ----
+result_data <- urban_data_classified %>%
+  filter(urban_relevant == "Yes") %>%
+  filter(Element == "Result") %>%
+  filter(!is.na(ElementText) & str_trim(ElementText) != "" & ElementText != "NA")
+
+cat("Rows to classify:", nrow(result_data), "\n")
+
+classify_benefits <- function(text, api_key, model, max_tokens) {
+  
+  # Sanitize input
+  text <- gsub('"', "'", text)
+  text <- gsub("\\\\", " ", text)
+  
+  prompt <- paste0(
+    "You are an expert in climate adaptation research.\n\n",
+    "Read the following text and extract:\n\n",
+    "1. BENEFICIARIES: Who or what benefits? List ALL.\n",
+    "2. BENEFIT TYPES: What types of benefits? List ALL.\n",
+    "3. SCALE: Choose ALL that apply: Individual, Household, Community, City, National, Regional, Global\n\n",
+    "Text:\n\"", text, "\"\n\n",
+    "Respond ONLY with this exact JSON format, no other text:\n",
+    "{\"beneficiaries\": [\"value1\", \"value2\"], \"benefit_types\": [\"value1\", \"value2\"], \"scales\": [\"value1\"]}"
+  )
+
+  response <- tryCatch({
+    POST(
+      url = "https://api.openai.com/v1/chat/completions",
+      add_headers(Authorization = paste("Bearer", api_key),
+                  `Content-Type` = "application/json"),
+      body = toJSON(list(
+        model                 = model,
+        max_completion_tokens = max_tokens,
+        messages              = list(list(role = "user", content = prompt))
+      ), auto_unbox = TRUE),
+      encode = "json"
+    )
+  }, error = function(e) NULL)
+
+  if (is.null(response)) {
+    return(list(beneficiaries = NA, benefit_types = NA, scales = NA))
+  }
+
+  cnt <- content(response, as = "parsed", encoding = "UTF-8")
+
+  if (!is.null(cnt$error)) {
+    return(list(beneficiaries = NA, benefit_types = NA, scales = NA))
+  }
+
+  raw_text <- cnt$choices[[1]]$message$content
+
+  result <- tryCatch({
+    clean_text <- gsub("```json|```", "", raw_text)
+    clean_text <- str_trim(clean_text)
+    clean_text <- gsub("\\n", " ", clean_text)
+    clean_text <- gsub("\\s{2,}", " ", clean_text)
+    fromJSON(clean_text)
+  }, error = function(e) {
+    list(beneficiaries = NA, benefit_types = NA, scales = NA)
+  })
+
+  return(result)
+}
+
+# ---- Test ----
+test <- classify_benefits(result_data$ElementText[1], OPENAI_API_KEY, GPT_MODEL, MAX_TOKENS)
+print(test)
+
+
+# ---- Run classification ----
+total_rows  <- nrow(result_data)
+error_count <- 0
+results     <- vector("list", total_rows)
+
+cat("Starting benefit classification of", total_rows, "rows...\n\n")
+
+for (i in seq_len(total_rows)) {
+
+  text   <- result_data$ElementText[i]
+  result <- classify_benefits(
+    text       = text,
+    api_key    = OPENAI_API_KEY,
+    model      = GPT_MODEL,
+    max_tokens = MAX_TOKENS
+  )
+
+  results[[i]] <- list(
+    beneficiaries = if (!is.null(result$beneficiaries) && !all(is.na(result$beneficiaries)))
+                      paste(unlist(result$beneficiaries), collapse = "; ") else NA,
+    benefit_types = if (!is.null(result$benefit_types) && !all(is.na(result$benefit_types)))
+                      paste(unlist(result$benefit_types), collapse = "; ") else NA,
+    scales        = if (!is.null(result$scales) && !all(is.na(result$scales)))
+                      paste(unlist(result$scales), collapse = "; ") else NA
+  )
+
+  if (is.na(results[[i]]$beneficiaries)) error_count <- error_count + 1
+
+  if (i %% 10 == 0 || i == 1) {
+    cat(sprintf("  Row %d / %d (%.0f%%) | Errors: %d\n",
+                i, total_rows, (i / total_rows) * 100, error_count))
+    flush.console()
+  }
+
+  if (i %% 100 == 0) {
+    temp_df  <- bind_rows(lapply(results[1:i], as.data.frame, stringsAsFactors = FALSE))
+    temp_out <- bind_cols(result_data[1:i, ], temp_df)
+    write_xlsx(temp_out, path = "data/benefits_TEMP.xlsx")
+    cat("  [checkpoint saved at row", i, "]\n")
+  }
+
+  Sys.sleep(0.2)
+}
+
+results_df    <- bind_rows(lapply(results, as.data.frame, stringsAsFactors = FALSE))
+results_final <- bind_cols(result_data, results_df)
+
+write_xlsx(results_final, path = "data/benefits_classified.xlsx")
+cat("\nDone!\n")
+cat("Total rows:", nrow(results_final), "\n")
+cat("Errors:    ", error_count, "\n")
+
+
+```
+
+```{r figures}
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+
+urban_data_classified <- read_excel("data/urban_relevance_classified.xlsx")
+
+cat("Rows loaded:", nrow(urban_data_classified), "\n")
+cat("Columns:", paste(names(urban_data_classified), collapse = ", "), "\n")
+
+
+# ---- Base filter: urban_relevant == Yes, remove NA in Element ----
+base <- urban_data_classified %>%
+  filter(urban_relevant == "Yes") %>%
+  filter(!is.na(Element) & Element != "NA")
+
+# ---- Colour palette (matching your style) ----
+my_colours <- c(
+  "#C8393B", "#E8A838", "#F0C93A", "#4DA04A", "#2E7D4F",
+  "#5BB5D5", "#2A5DA8", "#8B4DA0", "#D4736A", "#7BAF3E",
+  "#E8724A", "#A0C4D8", "#6B8E6B", "#C4A882", "#8B6E4A"
+)
+
+# ---- Helper: donut plot function ----
+make_donut <- function(data, col, title, top_n = NULL) {
+  
+  df <- data %>%
+    count(.data[[col]], name = "n") %>%
+    filter(!is.na(.data[[col]]) & .data[[col]] != "NA") %>%
+    arrange(desc(n))
+  
+  if (!is.null(top_n)) {
+    df <- df %>%
+      slice(1:top_n) %>%
+      mutate(!!col := str_wrap(.data[[col]], 20))
+  }
+  
+  df <- df %>%
+    mutate(
+      pct   = n / sum(n),
+      label = paste0(round(pct * 100), "%")
+    )
+  
+  ggplot(df, aes(x = 2, y = pct, fill = .data[[col]])) +
+    geom_col(width = 1, color = "white", linewidth = 0.5) +
+    coord_polar(theta = "y") +
+    xlim(0.5, 2.5) +
+    scale_fill_manual(values = my_colours[1:nrow(df)]) +
+    geom_text(aes(label = label),
+              position = position_stack(vjust = 0.5),
+              color = "white", size = 3.5, fontface = "bold") +
+    labs(title = title, fill = NULL) +
+    theme_void() +
+    theme(
+      plot.title      = element_text(hjust = 0.5, face = "bold", size = 13, margin = margin(b = 10)),
+      legend.position = "right",
+      legend.text     = element_text(size = 9)
+    )
+}
+# ---- Table 1: countries and number of data points ----
+country_summary<- base %>%
+  filter(!is.na(Country) & Country != "NA") %>%
+  count(Country, name = "Data Points") %>%
+  arrange(desc(`Data Points`))
+
+write_xlsx(country_summary, path = "data/country_summary.xlsx")
+cat("Saved!\n")
+
+# ---- Plot 1: All urban relevant rows — donut of Element col ----
+p1 <- make_donut(base, "Element", "Urban Relevant — by Element")
+print(p1)
+ggsave("figures/donut_element.png", p1, width = 8, height = 6, dpi = 300)
+
+# ---- Plot 2: Element == Action — donut of ElementLabel (top 15) ----
+action_data <- base %>%
+  filter(Element == "Action")
+
+p2 <- make_donut(action_data, "ElementLabel", "Actions — by Element Label", top_n = 15)
+print(p2)
+ggsave("donut_action_elementlabel.png", p2, width = 9, height = 6, dpi = 300)
+
+# ---- Plot 3: Element == Hazard — split multi-value HazardType ----
+hazard_data <- base %>%
+  filter(Element == "Hazard") %>%
+  filter(!is.na(HazardType) & HazardType != "NA") %>%
+  mutate(HazardType = strsplit(HazardType, ";")) %>%
+  tidyr::unnest(HazardType) %>%
+  mutate(HazardType = str_trim(HazardType)) %>%
+  filter(HazardType != "" & HazardType != "NA") %>%
+  count(HazardType, name = "n") %>%
+  arrange(desc(n)) %>%
+  slice(1:15) %>%
+  mutate(HazardType = reorder(HazardType, n))
+
+p3 <- ggplot(hazard_data, aes(x = HazardType, y = n, fill = HazardType)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  scale_fill_manual(values = rev(c(
+    "#E63946", "#F4A261", "#2A9D8F", "#457B9D", "#E9C46A",
+    "#264653", "#A8DADC", "#F77F00", "#6A4C93", "#43AA8B",
+    "#C77DFF", "#FF6B6B", "#4CC9F0"
+  ))) +
+  geom_text(aes(label = n), hjust = -0.2, size = 3.5) +
+  labs(x = NULL, y = "BTR Data points") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 1.5, face = "bold", size = 13),
+    axis.text  = element_text(size = 15)
+  ) +
+  expand_limits(y = max(hazard_data$n) * 1.1)
+
+
+print(p3)
+ggsave("figures/bar_hazard_elementlabel.png", p3, width = 9, height = 6, dpi = 300)
+
+cat("All 3 donuts saved!\n")
+
+# ---- Plot 4: Sector type IPCC ----
+plot_df <- base %>%
+  mutate(SectorTypeIPCC_GPT = ifelse(is.na(SectorTypeIPCC_GPT) | SectorTypeIPCC_GPT == "NA",
+                                     "Crosscutting", SectorTypeIPCC_GPT)) %>%
+  mutate(SectorTypeIPCC_GPT = strsplit(SectorTypeIPCC_GPT, ";")) %>%
+  unnest(SectorTypeIPCC_GPT) %>%
+  mutate(SectorTypeIPCC_GPT = str_trim(SectorTypeIPCC_GPT)) %>%
+  filter(SectorTypeIPCC_GPT != "") %>%
+  count(SectorTypeIPCC_GPT, name = "n") %>%
+  arrange(desc(n)) %>%
+  mutate(SectorTypeIPCC_GPT = reorder(SectorTypeIPCC_GPT, n))
+
+p4 <- ggplot(plot_df, aes(x = SectorTypeIPCC_GPT, y = n, fill = SectorTypeIPCC_GPT)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  geom_text(aes(label = n), hjust = -0.2, size = 3.5) +
+  scale_fill_manual(values = c(
+    "#C8393B", "#E8A838", "#F0C93A", "#4DA04A", "#2E7D4F",
+    "#5BB5D5", "#2A5DA8", "#8B4DA0", "#D4736A", "#7BAF3E",
+    "#E8724A", "#A0C4D8", "#6B8E6B", "#C4A882", "#8B6E4A"
+  )) +
+  labs(title = "Distribution by IPCC Sector Type", x = NULL, y = "BTR Data points") +
+  theme_minimal() +
+  theme(
+    axis.text = element_text(size = 10)
+  ) +
+  expand_limits(y = max(plot_df$n) * 1.15)
+
+print(p4)
+ggsave("figures/bar_sectoripcc_gpt.png", p4, width = 9, height = 6, dpi = 300)
+
+
+#Sankey 
+
+benefits<- read_excel("data/benefits_classified.xlsx")
+
+# See the column names
+names(benefits)
+
+
+# See unique values in both harmonized columns
+unique(benefits$`harmonized_beneficiary_group`)
+unique(benefits$`harmonized_benefit_type`)
+
+# ---- Packages ----
+library(dplyr)
+library(ggplot2)
+library(ggalluvial)
+library(tidyr)
+
+sankey_df <- benefits %>%
+  filter(!is.na(harmonized_beneficiary_group) & 
+         !is.na(harmonized_benefit_type)) %>%
+  mutate(
+    harmonized_beneficiary_group = strsplit(harmonized_beneficiary_group, ";"),
+    harmonized_benefit_type      = strsplit(harmonized_benefit_type, ";")
+  ) %>%
+  unnest(harmonized_beneficiary_group) %>%
+  unnest(harmonized_benefit_type) %>%
+  mutate(
+    group   = str_trim(harmonized_beneficiary_group),
+    benefit = str_trim(harmonized_benefit_type)
+  ) %>%
+  filter(group != "" & group != "NA",
+         benefit != "" & benefit != "NA") %>%
+  count(group, benefit, name = "value")
+
+# ---- Plot ----
+p5 <- ggplot(
+  sankey_df,
+  aes(axis1 = group, axis2 = benefit, y = value)
+) +
+  geom_alluvium(aes(fill = group), width = 0.25, alpha = 0.85) +
+  geom_stratum(width = 0.25, fill = "grey95", color = "grey40") +
+  geom_text(
+    stat = "stratum",
+    aes(label = after_stat(stratum)),
+    size = 3.5,
+    lineheight = 0.9
+  ) +
+  scale_x_discrete(
+    limits = c("Beneficiary Group", "Type of Benefit"),
+    expand = c(0.1, 0.1)
+  ) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    x    = NULL,
+    y    = "Number of elements",
+    fill = "Beneficiary group"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    legend.position = "bottom",
+    panel.grid      = element_blank()
+  )
+
+print(p5)
+
+
 ```
