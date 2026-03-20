@@ -1,0 +1,224 @@
+---
+title: "Urban Relevance Classifier - Cities, Settlements & Key Infrastructure"
+author: "BTR Analysis"
+date: "`r Sys.Date()`"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+```{r libraries}
+library(googledrive)
+library(readxl)
+library(httr)
+library(jsonlite)
+library(dplyr)
+library(writexl)
+library(stringr)
+library(progress)
+
+```
+
+```{r api_setup}
+# ---- Set API key ----
+OPENAI_API_KEY <- Sys.getenv("OPENAI_API_KEY")
+stopifnot(nzchar(OPENAI_API_KEY))
+
+# ---- Model settings ----
+GPT_MODEL  <- "gpt-4o-mini"   # change to gpt-5-nano if preferred
+MAX_TOKENS <- 2000
+```
+
+```{r load_data}
+# ---- Authenticate with Google Drive ----
+drive_auth()
+
+file_id <- "1SAImqfbM5Frd0YzyXt_550ebbBKM9HVOGgYJRQG6v6w"
+drive_download(as_id(file_id), path = "local_copy.xlsx", overwrite = TRUE)
+
+adaptdata <- read_excel("local_copy.xlsx", sheet = "raw_data_BTRs")
+
+cat("Total rows loaded:", nrow(adaptdata), "\n")
+cat("Columns:", paste(names(adaptdata), collapse = ", "), "\n")
+```
+
+```{r classify}
+# ---- GPT classification function ----
+classify_urban_relevance <- function(text, api_key, model, max_tokens) {
+
+  prompt <- paste0(
+    "You are an expert in urban climate adaptation research.\n\n",
+    "Your task is to classify the following text according to which urban concepts it references.\n\n",
+    "For each of the following urban categories, state whether it is referenced (Yes/No) in the text.\n",
+    "Consider all word variants and plurals for each category:\n\n",
+    "1. Urban (keywords: urban, urbanisation, urbanization)\n",
+    "2. City/Cities (keywords: city, cities)\n",
+    "3. Municipality/Municipal (keywords: municipality, municipal, municipalities)\n",
+    "4. Metropolitan/Metro (keywords: metropolitan, metro)\n",
+    "5. Peri-urban (keywords: peri-urban, periurban)\n",
+    "6. Informal settlement (keywords: informal settlement, informal settlements)\n",
+    "7. Slum (keywords: slum, slums, slum-dwellers, slum-dwelling, slum-based)\n",
+    "8. Township (keywords: township, townships)\n",
+    "9. Town (keywords: town, towns)\n",
+    "10. Built environment (keywords: built environment)\n",
+    "11. Human settlement (keywords: human settlement, human settlements)\n\n",
+    "Text:\n\"", text, "\"\n\n",
+    "Respond ONLY with a JSON object in this exact format (no additional text):\n",
+    "{\n",
+    "  \"urban_relevant\": \"Yes\" or \"No\",\n",
+    "  \"urban\": \"Yes\" or \"No\",\n",
+    "  \"city_cities\": \"Yes\" or \"No\",\n",
+    "  \"municipality_municipal\": \"Yes\" or \"No\",\n",
+    "  \"metropolitan_metro\": \"Yes\" or \"No\",\n",
+    "  \"peri_urban\": \"Yes\" or \"No\",\n",
+    "  \"informal_settlement\": \"Yes\" or \"No\",\n",
+    "  \"slum\": \"Yes\" or \"No\",\n",
+    "  \"township\": \"Yes\" or \"No\",\n",
+    "  \"town\": \"Yes\" or \"No\",\n",
+    "  \"built_environment\": \"Yes\" or \"No\",\n",
+    "  \"human_settlement\": \"Yes\" or \"No\",\n",
+    "  \"reasoning\": \"one sentence explanation\"\n",
+    "}"
+  )
+
+  response <- tryCatch({
+    POST(
+      url = "https://api.openai.com/v1/chat/completions",
+      add_headers(
+        Authorization = paste("Bearer", api_key),
+        `Content-Type` = "application/json"
+      ),
+      body = toJSON(list(
+        model                 = model,
+        max_completion_tokens = max_tokens,
+        messages              = list(
+          list(role = "user", content = prompt)
+        )
+      ), auto_unbox = TRUE),
+      encode = "json"
+    )
+  }, error = function(e) {
+    message("API call failed: ", e$message)
+    return(NULL)
+  })
+
+  if (is.null(response)) {
+    return(list(urban_relevant = "Error", urban = NA, city_cities = NA,
+                municipality_municipal = NA, metropolitan_metro = NA,
+                peri_urban = NA, informal_settlement = NA, slum = NA,
+                township = NA, town = NA, built_environment = NA,
+                human_settlement = NA, reasoning = "API call failed"))
+  }
+
+  cnt <- content(response, as = "parsed", encoding = "UTF-8")
+
+  if (!is.null(cnt$error)) {
+    return(list(urban_relevant = "Error", urban = NA, city_cities = NA,
+                municipality_municipal = NA, metropolitan_metro = NA,
+                peri_urban = NA, informal_settlement = NA, slum = NA,
+                township = NA, town = NA, built_environment = NA,
+                human_settlement = NA, reasoning = cnt$error$message))
+  }
+
+  raw_text <- cnt$choices[[1]]$message$content
+
+  result <- tryCatch({
+    clean_text <- gsub("```json|```", "", raw_text)
+    clean_text <- str_trim(clean_text)
+    fromJSON(clean_text)
+  }, error = function(e) {
+    list(urban_relevant = "Parse Error", urban = NA, city_cities = NA,
+         municipality_municipal = NA, metropolitan_metro = NA,
+         peri_urban = NA, informal_settlement = NA, slum = NA,
+         township = NA, town = NA, built_environment = NA,
+         human_settlement = NA, reasoning = raw_text)
+  })
+
+  return(result)
+}
+
+# ---- Run classification ----
+total_rows  <- nrow(adaptdata)
+error_count <- 0
+results     <- vector("list", total_rows)
+
+cat("Starting classification of", total_rows, "rows...\n\n")
+
+for (i in seq_len(total_rows)) {
+
+  text   <- adaptdata$ElementText[i]
+  result <- classify_urban_relevance(
+    text       = text,
+    api_key    = OPENAI_API_KEY,
+    model      = GPT_MODEL,
+    max_tokens = MAX_TOKENS
+  )
+
+  if (!is.null(result$urban_relevant) &&
+      result$urban_relevant %in% c("Error", "Parse Error")) {
+    error_count <- error_count + 1
+  }
+
+  results[[i]] <- list(
+    urban_relevant         = if (!is.null(result$urban_relevant))         result$urban_relevant         else NA,
+    urban                  = if (!is.null(result$urban))                  result$urban                  else NA,
+    city_cities            = if (!is.null(result$city_cities))            result$city_cities            else NA,
+    municipality_municipal = if (!is.null(result$municipality_municipal)) result$municipality_municipal else NA,
+    metropolitan_metro     = if (!is.null(result$metropolitan_metro))     result$metropolitan_metro     else NA,
+    peri_urban             = if (!is.null(result$peri_urban))             result$peri_urban             else NA,
+    informal_settlement    = if (!is.null(result$informal_settlement))    result$informal_settlement    else NA,
+    slum                   = if (!is.null(result$slum))                   result$slum                   else NA,
+    township               = if (!is.null(result$township))               result$township               else NA,
+    town                   = if (!is.null(result$town))                   result$town                   else NA,
+    built_environment      = if (!is.null(result$built_environment))      result$built_environment      else NA,
+    human_settlement       = if (!is.null(result$human_settlement))       result$human_settlement       else NA,
+    reasoning              = if (!is.null(result$reasoning))              result$reasoning              else NA
+  )
+
+  # Progress update every 10 rows
+  if (i %% 10 == 0 || i == 1) {
+    cat(sprintf("  Row %d / %d (%.0f%%) | Errors: %d\n",
+                i, total_rows, (i / total_rows) * 100, error_count))
+    flush.console()
+  }
+
+  Sys.sleep(0.2)
+}
+
+# ---- Bind results ----
+results_df            <- bind_rows(lapply(results, as.data.frame, stringsAsFactors = FALSE))
+adaptdata_classified <- bind_cols(adaptdata, results_df) %>%
+  mutate(needs_review = urban_relevant %in% c("Error", "Parse Error"))
+
+cat("\n\nClassification complete!\n")
+cat("Urban Relevant - Yes:", sum(adaptdata_classified$urban_relevant == "Yes", na.rm = TRUE), "\n")
+cat("Urban Relevant - No: ", sum(adaptdata_classified$urban_relevant == "No",  na.rm = TRUE), "\n")
+cat("Errors:              ", sum(adaptdata_classified$needs_review,             na.rm = TRUE), "\n")
+```
+
+```{r export}
+# ---- Export to Excel ----
+output_path <- "urban_relevance_classified.xlsx"
+write_xlsx(adaptdata_classified, path = output_path)
+cat("Results saved to:", output_path, "\n")
+```
+
+```{r summary_table}
+# ---- Summary of urban category hits ----
+summary<- adaptdata_classified %>%
+  summarise(
+    Total_Rows             = n(),
+    Urban_Relevant         = sum(urban_relevant         == "Yes", na.rm = TRUE),
+    Urban                  = sum(urban                  == "Yes", na.rm = TRUE),
+    City_Cities            = sum(city_cities            == "Yes", na.rm = TRUE),
+    Municipality_Municipal = sum(municipality_municipal == "Yes", na.rm = TRUE),
+    Metropolitan_Metro     = sum(metropolitan_metro     == "Yes", na.rm = TRUE),
+    Peri_Urban             = sum(peri_urban             == "Yes", na.rm = TRUE),
+    Informal_Settlement    = sum(informal_settlement    == "Yes", na.rm = TRUE),
+    Slum                   = sum(slum                   == "Yes", na.rm = TRUE),
+    Township               = sum(township               == "Yes", na.rm = TRUE),
+    Town                   = sum(town                   == "Yes", na.rm = TRUE),
+    Built_Environment      = sum(built_environment      == "Yes", na.rm = TRUE),
+    Human_Settlement       = sum(human_settlement       == "Yes", na.rm = TRUE)
+  )
+```
