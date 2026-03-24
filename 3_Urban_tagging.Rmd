@@ -588,3 +588,76 @@ print(p5)
 
 
 ```
+
+```{r CDP data}
+library(googledrive)
+
+file_id <- "1Y6DbQDm1DdagZG0GFB8r8VSKpYArj5CG"
+drive_download(as_id(file_id), path = "data/CDP_benefits_tagged.xlsx", overwrite = TRUE)
+
+benefits_cdp <- read_excel("data/benefits_tagged.xlsx", sheet = "DATA")
+
+cat("Rows loaded:", nrow(benefits_cdp), "\n")
+cat("Columns:", paste(names(benefits_cdp), collapse = ", "), "\n")
+
+library(ggalluvial)
+library(tidyr)
+
+# ---- Prepare Sankey data ----
+sankey_df_cdp <- benefits_cdp %>%
+  filter(!is.na(BenefitType_Tagg) & BenefitType_Tagg != "NA" &
+         !is.na(BeneficiaryGroup_Tagg) & BeneficiaryGroup_Tagg != "NA" &
+         BenefitType_Tagg != "Not applicable" & BeneficiaryGroup_Tagg != "Not applicable") %>%
+  mutate(
+    BenefitType_Tagg      = strsplit(BenefitType_Tagg, ";"),
+    BeneficiaryGroup_Tagg = strsplit(BeneficiaryGroup_Tagg, ";")
+  ) %>%
+  unnest(BenefitType_Tagg) %>%
+  unnest(BeneficiaryGroup_Tagg) %>%
+  mutate(
+    BenefitType_Tagg      = str_trim(BenefitType_Tagg),
+    BeneficiaryGroup_Tagg = str_trim(BeneficiaryGroup_Tagg)
+  ) %>%
+  filter(
+    BenefitType_Tagg      != "" & BenefitType_Tagg      != "NA" & BenefitType_Tagg      != "Not applicable",
+    BeneficiaryGroup_Tagg != "" & BeneficiaryGroup_Tagg != "NA" & BeneficiaryGroup_Tagg != "Not applicable"
+  ) %>%
+  count(BeneficiaryGroup_Tagg, BenefitType_Tagg, name = "value")
+
+# ---- Plot ----
+p_sankey <- ggplot(
+  sankey_df,
+  aes(axis1 = BeneficiaryGroup_Tagg, axis2 = BenefitType_Tagg, y = value)
+) +
+  geom_alluvium(aes(fill = BeneficiaryGroup_Tagg), width = 0.25, alpha = 0.85) +
+  geom_stratum(width = 0.25, fill = "grey95", color = "grey40") +
+  geom_text(
+    stat = "stratum",
+    aes(label = after_stat(stratum)),
+    size = 3.5,
+    lineheight = 0.9
+  ) +
+  scale_x_discrete(
+    limits = c("Beneficiary Group", "Benefit Type"),
+    expand = c(0.1, 0.1)
+  ) +
+  scale_fill_manual(values = c(
+    "#C8393B", "#E8A838", "#F0C93A", "#4DA04A", "#2E7D4F",
+    "#5BB5D5", "#2A5DA8", "#8B4DA0", "#D4736A", "#7BAF3E",
+    "#E8724A", "#A0C4D8", "#6B8E6B", "#C4A882", "#8B6E4A"
+  )) +
+  labs(
+    title = "Beneficiary Groups and Benefit Types",
+    x     = NULL,
+    y     = "Number of data points",
+    fill  = "Beneficiary Group"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    legend.position = "bottom",
+    panel.grid      = element_blank()
+  )
+
+print(p_sankey)
+ggsave("figures/sankey_cdp_benefits.png", p_sankey, width = 11, height = 8, dpi = 300)
+```
