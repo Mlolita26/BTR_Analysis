@@ -387,6 +387,12 @@ base <- urban_data_classified %>%
   filter(urban_relevant == "Yes") %>%
   filter(!is.na(Element) & Element != "NA")
 
+
+base <- base %>%
+  filter(Country != "EU")
+
+cat("Rows after removing EU:", nrow(base), "\n")
+
 # ---- Colour palette (matching your style) ----
 my_colours <- c(
   "#C8393B", "#E8A838", "#F0C93A", "#4DA04A", "#2E7D4F",
@@ -595,7 +601,7 @@ library(googledrive)
 file_id <- "1Y6DbQDm1DdagZG0GFB8r8VSKpYArj5CG"
 drive_download(as_id(file_id), path = "data/CDP_benefits_tagged.xlsx", overwrite = TRUE)
 
-benefits_cdp <- read_excel("data/benefits_tagged.xlsx", sheet = "DATA")
+benefits_cdp <- read_excel("data/CDP_benefits_tagged.xlsx", sheet = "DATA")
 
 cat("Rows loaded:", nrow(benefits_cdp), "\n")
 cat("Columns:", paste(names(benefits_cdp), collapse = ", "), "\n")
@@ -660,4 +666,122 @@ p_sankey <- ggplot(
 
 print(p_sankey)
 ggsave("figures/sankey_cdp_benefits.png", p_sankey, width = 11, height = 8, dpi = 300)
+
+# Total in sankey_df_cdp
+cat("Total flows in CDP Sankey:", sum(sankey_df_cdp$value), "\n")
+
+# Total in BTR sankey
+cat("Total flows in BTR Sankey:", sum(sankey_df$value), "\n")
+
+# Original rows in CDP (excluding not applicable)
+cdp_included <- benefits_cdp %>%
+  filter(!is.na(BenefitType_Tagg) & BenefitType_Tagg != "NA" &
+         !is.na(BeneficiaryGroup_Tagg) & BeneficiaryGroup_Tagg != "NA" &
+         BenefitType_Tagg != "Not applicable" & 
+         BeneficiaryGroup_Tagg != "Not applicable") %>%
+  nrow()
+
+cat("CDP rows included (before splitting):", cdp_included, "\n")
+cat("CDP Not applicable excluded:", 656, "\n")
+cat("CDP total check:", cdp_included + 656, "\n")
+
+# Total flows in BTR Sankey
+cat("Total flows in BTR Sankey:", sum(sankey_df$value), "\n")
+
+# Original rows in BTR (excluding NAs)
+btr_included <- base %>%
+  filter(Element == "Action") %>%
+  filter(!is.na(ActionType) & ActionType != "NA") %>%
+  nrow()
+
+cat("BTR rows included (before splitting):", btr_included, "\n")
+cat("BTR total Action rows:", 229, "\n")
+cat("BTR excluded:", 229 - btr_included, "\n")
+
+
+
+#####Plot action 
+# ---- CDP Action data ----
+actions_cdp <- read_excel("data/CDP_benefits_tagged.xlsx", sheet = "Adaptation action")
+
+cdp_action_df <- actions_cdp %>%
+  filter(!is.na(ActionType_Tagg) & 
+         ActionType_Tagg != "NA" & 
+         ActionType_Tagg != "Not applicable") %>%
+  mutate(ActionType_Tagg = strsplit(ActionType_Tagg, ";")) %>%
+  unnest(ActionType_Tagg) %>%
+  mutate(ActionType_Tagg = str_trim(ActionType_Tagg)) %>%
+  filter(ActionType_Tagg != "" & 
+         ActionType_Tagg != "NA" & 
+         ActionType_Tagg != "Not applicable") %>%
+  count(ActionType_Tagg, name = "n") %>%
+  arrange(desc(n)) %>%
+  mutate(ActionType_Tagg = reorder(ActionType_Tagg, n))
+
+# ---- BTR Action data ----
+btr_action_df <- base %>%
+  filter(Element == "Action") %>%
+  filter(!is.na(ActionType) & 
+         ActionType != "NA") %>%
+  mutate(ActionType = strsplit(ActionType, ";")) %>%
+  unnest(ActionType) %>%
+  mutate(ActionType = str_trim(ActionType),
+         # Harmonise capitalisation to match CDP
+         ActionType = case_when(
+           str_to_lower(ActionType) == "ecosystem based"                    ~ "Ecosystem-based",
+           str_to_lower(ActionType) == "social"                             ~ "Social",
+           str_to_lower(ActionType) == "institutional"                      ~ "Institutional",
+           str_to_lower(ActionType) == "infrastructure/structural / physical" ~ "Structural/Physical",
+           TRUE ~ ActionType
+         )) %>%
+  filter(ActionType != "" & ActionType != "NA") %>%
+  count(ActionType, name = "n") %>%
+  arrange(desc(n)) %>%
+  mutate(ActionType = reorder(ActionType, n))
+
+action_colours <- c(
+  "Ecosystem-based"     = "#4DA04A",
+  "Social"              = "#E8A838",
+  "Institutional"       = "#F0C93A",
+  "Structural/Physical" = "#808080"
+)
+
+# ---- Plot CDP ----
+p_cdp <- ggplot(cdp_action_df, aes(x = ActionType_Tagg, y = n, fill = ActionType_Tagg)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  geom_text(aes(label = n), hjust = -0.2, size = 3.5) +
+  scale_fill_manual(values = action_colours) +
+  labs(title = "Self-reported city-level data (CDP database)", x = NULL, y = "Data points") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 13),
+        axis.text  = element_text(size = 15)) +
+  expand_limits(y = max(cdp_action_df$n) * 1.15)
+
+# ---- Plot BTR ----
+p_btr <- ggplot(btr_action_df, aes(x = ActionType, y = n, fill = ActionType)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  geom_text(aes(label = n), hjust = -0.2, size = 3.5) +
+  scale_fill_manual(values = action_colours) +
+  labs(title = "Country-reported information in BTRs", x = NULL, y = "Data points") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 13),
+        axis.text  = element_text(size = 15)) +
+  expand_limits(y = max(btr_action_df$n) * 1.15)
+
+# ---- Panel plot with A/B labels ----
+p_panel <- p_cdp + p_btr +
+  plot_annotation(
+    title = "Action Types: CDP vs BTR",
+    tag_levels = "A",
+    theme = theme(
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+      plot.tag   = element_text(face = "bold", size = 16)
+    )
+  )
+
+print(p_panel)
+ggsave("figures/panel_actiontype.png", p_panel, width = 12, height = 6, dpi = 300)
+
 ```
