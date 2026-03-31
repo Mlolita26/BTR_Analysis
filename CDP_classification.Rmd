@@ -1,0 +1,779 @@
+---
+title: "CDP Data Classification — Hazards, Co-Benefits, Beneficiaries & Action Types"
+output: html_document
+date: "2026-03-20"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r packages}
+## =============================================================================
+## CDP City-Level Data Processing — GPT-based classification
+## Classifies: Hazards → BTR categories, Co-benefits → Harmonized Benefit Types,
+##             Co-benefits → Beneficiary Groups, Action Groups → Intervention Types
+## Mirrors the BTR processing methodology (ellmer batch prompts)
+## =============================================================================
+
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tidyr)
+  library(stringr)
+  library(readr)
+  library(ggplot2)
+  library(viridisLite)
+  library(scales)
+  library(glue)
+  library(ellmer)
+})
+```
+
+```{r config}
+# ==============================================================================
+# 0) CONFIG
+# ==============================================================================
+MODEL      <- "gpt-5"        # adjust as needed: "gpt-5-nano", "gpt-4o-mini", etc.
+CHUNK_SIZE <- 40
+
+# ---- API key ----
+btr_key <- Sys.getenv("BTR_KEY")
+stopifnot("BTR_KEY is not set in your environment." = nzchar(btr_key))
+Sys.setenv(OPENAI_API_KEY = btr_key)
+```
+
+```{r load-data}
+# ==============================================================================
+# 1) LOAD DATA
+# ==============================================================================
+
+# ---- Adjust this path to your local file ----
+cdp <- read_csv("Working_file_CDP_Data_for_AGR_paper_xlsx_-_DATA.csv",
+                show_col_types = FALSE)
+
+cdp <- cdp %>%
+  rename(
+    Hazards_raw    = Hazards,
+    ActionGroup    = `Action Group`,
+    CoBenefits_raw = `Co-benefits realized 1`,
+    Category_raw   = Category
+  )
+
+cdp <- cdp %>% tibble::rowid_to_column("RowID")
+
+cat("Loaded", nrow(cdp), "rows from CDP data\n")
+cat("Columns:", paste(names(cdp), collapse = ", "), "\n")
+cat("Non-empty Hazards:", sum(!is.na(cdp$Hazards_raw) & cdp$Hazards_raw != ""), "\n")
+cat("Non-empty Co-benefits:", sum(!is.na(cdp$CoBenefits_raw) & cdp$CoBenefits_raw != ""), "\n")
+cat("Non-empty Action Groups:", sum(!is.na(cdp$ActionGroup) & cdp$ActionGroup != ""), "\n")
+```
+
+```{r gpt-batch-function}
+# ==============================================================================
+# GENERIC GPT BATCH CLASSIFIER (reused for all steps)
+# ==============================================================================
+
+run_gpt_batch <- function(txts, prompt_fn, model = MODEL, chunk_size = CHUNK_SIZE) {
+  if (!length(txts)) return(character(0))
+
+  out <- vector("character", length(txts))
+  idx <- seq_along(txts)
+  chunks <- split(idx, ceiling(idx / chunk_size))
+
+  pb <- txtProgressBar(min = 0, max = length(chunks), style = 3)
+  on.exit(close(pb), add = TRUE)
+
+  for (i in seq_along(chunks)) {
+    ids <- chunks[[i]]
+    prompt <- prompt_fn(txts[ids])
+
+    chat <- ellmer::chat_openai(model = model)
+    ans <- tryCatch(chat$chat(prompt), error = function(e) e)
+
+    if (inherits(ans, "error")) {
+      warning("GPT batch failed: ", conditionMessage(ans), " — assigning NA for this chunk.")
+      out[ids] <- NA_character_
+      setTxtProgressBar(pb, i)
+      next
+    }
+
+    lines <- strsplit(ans, "\\r?\\n", perl = TRUE)[[1]]
+    lines <- trimws(lines)
+    lines <- lines[nzchar(lines)]
+    lines <- sub("^[0-9]+[.)\\-:]\\s*", "", lines, perl = TRUE)
+
+    if (length(lines) < length(ids)) {
+      lines <- c(lines, rep(NA_character_, length(ids) - length(lines)))
+    }
+    if (length(lines) > length(ids)) {
+      lines <- lines[seq_along(ids)]
+    }
+
+    out[ids] <- lines
+    setTxtProgressBar(pb, i)
+  }
+  out
+}
+```
+
+```{r step1-hazards}
+# ==============================================================================
+# STEP 1: HAZARD RECLASSIFICATION (GPT)
+# ==============================================================================
+
+cat("\n===== STEP 1: Hazard Reclassification (GPT) =====\n")
+
+HAZARD_LABELS <- c(
+  "Extreme temperature",
+  "Storm",
+  "Drought",
+  "Wildfire",
+  "Landslide",
+  "Flood",
+  "Change in temperature",
+  "Change in precipitation",
+  "Salinization",
+  "Land degradation",
+  "Sea level rise",
+  "Sea temperature",
+  "Ocean acidification",
+  "Pest and disease",
+  "Not applicable"
+)
+
+make_hazard_batch_prompt <- function(txts) {
+  glue::glue(
+'You will read short text passages describing climate hazards reported by cities.
+Your task is to classify each passage into ONE or MORE of the hazard categories below.
+
+Return exactly ONE line per input, in the same order.
+If more than one category clearly applies, separate them with "; ".
+If the text does not describe a climate hazard (e.g. earthquakes, general statements, "Action does not address hazard"), return exactly: Not applicable
+Please return exactly the names of the categories below and nothing else do not include any other category
+
+Use only these exact labels:
+
+- Extreme temperature
+Definition: Meteorological events related to extreme or unusual temperatures. Includes heat waves, excessive heat, extreme heat, extreme cold, cold waves, snow, ice, frost, freeze, severe winter, heat stress, urban heat islands.
+
+- Storm
+Definition: Meteorological events such as storms. Includes tropical storms, cyclones, typhoons, hurricanes, hail, lightning, thunderstorms, heavy rain/precipitation, windstorms, sand/dust storms, tornadoes, extreme wind, storm surges.
+
+- Drought
+Definition: Climatological events related to drought. Includes drought cycles, prolonged droughts, dry spells, water stress, water scarcity, increased water demand, aridity.
+
+- Wildfire
+Definition: Climatological events such as wildfires. Includes forest fires, land fires, bush fires, pasture fires, fire weather (risk of wildfires).
+
+- Landslide
+Definition: Climatological events such as landslides. Includes mass movements, mudslides, rockfalls.
+
+- Flood
+Definition: Hydrological events such as floods. Includes coastal floods, river floods, urban floods, flash floods, surface water flooding, groundwater flooding, pluvial flooding, inundation, flooding from heavy precipitation.
+
+- Change in temperature
+Definition: Consistent alteration in average temperature over multiple years or decades. Includes rising average temperatures, higher average temperatures, increasing annual temperatures. NOT sudden extreme events (those are Extreme temperature).
+
+- Change in precipitation
+Definition: Alterations in precipitation patterns over multiple years or decades. Includes shifts in timing, amount, intensity, or frequency of rainfall.
+
+- Salinization
+Definition: Increase in salt content in soil or freshwater systems. Includes saltwater intrusion, marine intrusion, increased salinity.
+
+- Land degradation
+Definition: Decline in quality and health of land resources. Includes soil degradation, soil erosion, desertification, loss of green space/green cover, biodiversity loss, shifting ecoregions, subsidence.
+
+- Sea level rise
+Definition: Increase in global or local average sea level. Includes coastal flooding from sea level rise, coastal erosion, other coastal events.
+
+- Sea temperature
+Definition: Changes to the temperature of the ocean surface layer. Includes oceanic events related to temperature.
+
+- Ocean acidification
+Definition: Reduction in ocean pH over extended periods. Includes coral bleaching from acidification, eutrophication.
+
+- Pest and disease
+Definition: Climate-induced biological events. Includes pests, diseases, epidemics, insect infestations, vector-borne diseases, air-borne diseases, water-borne diseases, infectious diseases, invasive species.
+
+- Not applicable
+Definition: The passage does not describe a climate hazard. Includes earthquakes, volcanic events, general statements like "Action does not address hazard", "Others" without further specification, social vulnerability without a specific hazard.
+
+Decision rules:
+1. Classify from the text itself only.
+2. If a passage mentions multiple distinct hazards, list all that apply separated by "; ".
+3. "Flooding, heavy precipitation" → classify as both "Flood" and "Storm" (or just "Flood" if the precipitation is the cause of flooding).
+4. "Heat related" → "Extreme temperature"
+5. "Cold-related" → "Extreme temperature"
+6. "Fire" → "Wildfire"
+7. "Coastal hazards" → "Sea level rise"
+8. "Infectious disease" → "Pest and disease"
+9. "Ecological degradation" → "Land degradation"
+10. "Land-related" → "Landslide" (unless context suggests otherwise, then "Land degradation")
+11. "Others" → "Not applicable"
+12. "Storm" → "Storm"
+13. Do not explain your reasoning. Output labels only, nothing else.
+
+INPUTS:
+{paste0(sprintf("%d) %s", seq_along(txts), txts), collapse = "\\n")}')
+}
+
+# --- Classify unique hazard strings ---
+unique_hazards <- cdp %>%
+  filter(!is.na(Hazards_raw), Hazards_raw != "") %>%
+  distinct(Hazards_raw) %>%
+  pull(Hazards_raw)
+
+cat("Classifying", length(unique_hazards), "unique hazard strings...\n")
+
+hazard_classifications <- run_gpt_batch(
+  unique_hazards,
+  make_hazard_batch_prompt,
+  model = MODEL,
+  chunk_size = CHUNK_SIZE
+)
+
+hazard_map <- tibble(
+  Hazards_raw    = unique_hazards,
+  HazardType_BTR = hazard_classifications
+)
+
+# Join back to main data
+cdp <- cdp %>% left_join(hazard_map, by = "Hazards_raw")
+
+# Summary: explode multi-label classifications for counting
+hazard_summary <- cdp %>%
+  filter(!is.na(HazardType_BTR), HazardType_BTR != "Not applicable") %>%
+  separate_rows(HazardType_BTR, sep = ";\\s*") %>%
+  mutate(HazardType_BTR_clean = str_squish(HazardType_BTR)) %>%
+  filter(HazardType_BTR_clean != "", HazardType_BTR_clean != "Not applicable") %>%
+  count(HazardType_BTR_clean, sort = TRUE) %>%
+  rename(`Hazard Category` = HazardType_BTR_clean, Occurrences = n)
+
+cat("\nHazard summary:\n")
+print(as.data.frame(hazard_summary))
+write_csv(hazard_summary, "cdp_hazard_counts.csv")
+write_csv(hazard_map, "cdp_hazard_mapping_review.csv")
+```
+
+```{r step2-cobenefits}
+# ==============================================================================
+# STEP 2: CO-BENEFIT RECLASSIFICATION (GPT)
+# ==============================================================================
+
+cat("\n===== STEP 2: Co-Benefit Reclassification (GPT) =====\n")
+
+BENEFIT_LABELS <- c(
+  "Physical Infrastructure",
+  "Risk Management & Response",
+  "Essential Services",
+  "Policy, Planning & Financing",
+  "Knowledge & Awareness",
+  "Economic Development",
+  "Ecosystem Restoration",
+  "Not applicable"
+)
+
+make_cobenefit_batch_prompt <- function(txts) {
+  glue::glue(
+'You will read short text passages describing co-benefits of climate adaptation actions reported by cities.
+Your task is to classify each passage into ONE of the benefit type categories below.
+
+Return exactly ONE line per input, in the same order.
+If more than one category clearly and explicitly applies, separate them with "; ". Favor a single category.
+If the text does not describe a meaningful co-benefit (e.g. "Do not know", "Others"), return exactly: Not applicable
+Please return exactly the names of the categories below and nothing else.
+
+Use only these exact labels:
+
+- Physical Infrastructure
+Definition: Direct construction or structural strengthening of the built environment and public spaces to withstand climate impacts.
+Examples: Relocation to resilient housing, underground soakaways, pocket parks, affordable housing construction, strengthening homesteads, road safety improvements, improved mobility and access, reduced congestion, transport improvements.
+
+- Risk Management & Response
+Definition: Establishment of systems, protocols, and immediate aid designed to predict, prepare for, and mitigate damage from climate-related disasters.
+Examples: Early warning systems, flood risk management, disaster preparedness frameworks, emergency relief, increased resilience, enhanced climate change adaptation, increased security/protection for vulnerable populations, reduced disaster/disease health impacts, reduced disruption of networks.
+
+- Essential Services
+Definition: Improvements to basic public utilities and services (water, sanitation, energy, waste, food) ensuring they remain functional under climate stress.
+Examples: Irrigation services, access to treated drinking water, sewer connections, renewable energy transitions, waste segregation and recycling, improved water/soil quality, increased water/energy/food security, reduced fuel/energy poverty, increased access to energy.
+
+- Policy, Planning & Financing
+Definition: Creation of strategic frameworks, regulatory codes, and funding mechanisms that institutionalize climate adaptation into government processes.
+Examples: Funding for municipal interventions, incorporating climate change into urban planning, municipal adaptation plans, building codes, coastal zone plans, increased transparency and accountability, improved access to data for decision-making.
+
+- Knowledge & Awareness
+Definition: Initiatives focused on capacity building, data accessibility, education, and research to improve the ability to respond to climate change.
+Examples: Capacity building for vulnerability assessments, climate risk identification, health adaptation training, adaptation blueprints, improved education and public awareness on climate issues, shift to more sustainable behaviours.
+
+- Economic Development
+Definition: Programs that use financial incentives, tourism, livelihood support, or social inclusion to create economic value while fostering climate resilience.
+Examples: Agroforestry for food security, economic mechanisms for conservation, green tourism marketing, job creation, increased economic production, increased labor productivity, reduced costs, poverty eradication, social inclusion/equality/justice, revenue generation, fewer households/businesses forced from homes.
+
+- Ecosystem Restoration
+Definition: Restoration, rehabilitation, or enhancement of degraded ecosystems and natural processes to improve ecological functioning and landscape resilience.
+Examples: Reforestation, wetland restoration, mangrove rehabilitation, coastal habitat restoration, protected/improved biodiversity and ecosystem services, increased/improved green space, improved air quality, reduced GHG emissions, reduced natural resource depletion, reduced noise/light pollution.
+
+- Not applicable
+Definition: The text does not describe a co-benefit, or is too vague (e.g. "Do not know", "Others").
+
+Decision rules:
+1. Classify based on what the co-benefit IS, not what action produced it.
+2. Choose the single best-fitting category. Only use multiple if genuinely distinct benefits are described.
+3. Health-related co-benefits: if about health SERVICE delivery → Essential Services; if about reduced health RISK from disasters → Risk Management & Response; if about public health improvements generally → Essential Services.
+4. "Reduced GHG emissions" → Ecosystem Restoration (mitigation co-benefit linked to ecological improvement).
+5. "Improved air quality" → Ecosystem Restoration.
+6. "Reduced costs" → Economic Development.
+7. "Improved road safety" → Physical Infrastructure.
+8. "Improved mobility and access" → Physical Infrastructure.
+9. "Reduced congestion" → Physical Infrastructure.
+10. "Increased transparency and accountability" → Policy, Planning & Financing.
+11. "Improved education and public awareness on climate issues" → Knowledge & Awareness.
+12. "Undertaken in collaboration with Indigenous peoples" → Knowledge & Awareness.
+13. Do not explain your reasoning. Output labels only, nothing else.
+
+INPUTS:
+{paste0(sprintf("%d) %s", seq_along(txts), txts), collapse = "\\n")}')
+}
+
+# Classify unique co-benefit strings
+unique_cobens <- cdp %>%
+  filter(!is.na(CoBenefits_raw), CoBenefits_raw != "") %>%
+  distinct(CoBenefits_raw) %>%
+  pull(CoBenefits_raw)
+
+cat("Classifying", length(unique_cobens), "unique co-benefit strings...\n")
+
+coben_classifications <- run_gpt_batch(
+  unique_cobens,
+  make_cobenefit_batch_prompt,
+  model = MODEL,
+  chunk_size = CHUNK_SIZE
+)
+
+coben_map <- tibble(
+  CoBenefits_raw = unique_cobens,
+  BenefitType    = coben_classifications
+)
+
+# Join back
+cdp <- cdp %>% left_join(coben_map, by = "CoBenefits_raw")
+
+# Summary
+benefit_summary <- cdp %>%
+  filter(!is.na(BenefitType), BenefitType != "Not applicable") %>%
+  separate_rows(BenefitType, sep = ";\\s*") %>%
+  mutate(BenefitType = str_squish(BenefitType)) %>%
+  filter(BenefitType != "", BenefitType != "Not applicable") %>%
+  count(BenefitType, sort = TRUE) %>%
+  rename(`Benefit Type` = BenefitType, Occurrences = n)
+
+cat("\nCo-benefit summary:\n")
+print(as.data.frame(benefit_summary))
+write_csv(benefit_summary, "cdp_benefit_counts.csv")
+write_csv(coben_map, "cdp_cobenefit_mapping_review.csv")
+```
+
+```{r step3-beneficiaries}
+# ==============================================================================
+# STEP 3: BENEFICIARY GROUP EXTRACTION (GPT)
+# ==============================================================================
+
+cat("\n===== STEP 3: Beneficiary Group Extraction (GPT) =====\n")
+
+BENEFICIARY_LABELS <- c(
+  "Governance & Institutions",
+  "Vulnerable Groups",
+  "Urban Communities",
+  "Ecological & Natural Systems",
+  "Economic & Built Sectors",
+  "Not applicable"
+)
+
+make_beneficiary_batch_prompt <- function(txts) {
+  glue::glue(
+'You will read short text passages describing co-benefits of climate adaptation actions reported by cities.
+Your task is to identify which beneficiary group benefits from this co-benefit.
+
+Return exactly ONE line per input, in the same order.
+If more than one beneficiary group clearly applies, separate them with "; ".
+Be CONSERVATIVE: only tag when there is a clear, explicit link between the co-benefit and a beneficiary group.
+If the text is too short, vague, generic, or does not clearly point to a specific beneficiary group, return exactly: Not applicable
+
+Use only these exact labels:
+
+- Governance & Institutions
+Definition: The co-benefit strengthens government capacity, inter-agency coordination, strategic plans, policies, regulatory frameworks, or institutional systems.
+Typical clues: municipal plan, policy framework, building codes, institutional capacity, governance, inter-agency coordination, data for decision-making, regulatory updates, monitoring and evaluation, transparency, accountability.
+
+- Vulnerable Groups
+Definition: The co-benefit primarily protects or supports populations disproportionately at risk: urban poor, slum/informal settlement residents, displaced populations, elderly, women, children, food-insecure households, low-income communities.
+Typical clues: poor/vulnerable populations, informal settlements, food insecurity, displacement, relocation, cash transfers, social protection, equity, justice, inclusion of marginalized groups, protection for poor/vulnerable, poverty eradication/reduction.
+
+- Urban Communities
+Definition: The co-benefit primarily serves city residents or the general urban population through improved public spaces, services, public health, safety, or quality of life.
+Typical clues: city residents, urban population, public health, green spaces, cooling, community engagement, awareness campaigns, air quality, mental wellbeing, public squares, neighborhood improvement, general public services, mobility and access.
+
+- Ecological & Natural Systems
+Definition: The co-benefit primarily restores, protects, or enhances ecosystems, biodiversity, habitats, or natural heritage.
+Typical clues: biodiversity, ecosystem services, wetland restoration, mangrove, reforestation, habitat protection, species conservation, green infrastructure for ecological function, GHG emission reduction, natural resource conservation, improved green space.
+
+- Economic & Built Sectors
+Definition: The co-benefit primarily supports economic activities, industries, transport networks, energy systems, built structures, or commercial operations.
+Typical clues: transport sector, construction, energy infrastructure, economic diversification, tourism revenue, business continuity, supply chain, industrial resilience, reduced costs for businesses, job creation, economic production, labor productivity.
+
+- Not applicable
+Definition: The co-benefit text is too vague, generic, or does not clearly indicate a specific beneficiary group. Also use for "Do not know", "Others", or empty statements.
+
+Decision rules:
+1. Classify based on WHO BENEFITS from the co-benefit, not what produced it.
+2. Be conservative — only tag when there is a clear and explicit link.
+3. "Reduced costs" alone → Not applicable (too vague without context on whose costs).
+4. "Enhanced resilience" alone → Not applicable (too generic).
+5. "Improved physical health" → Urban Communities (general public health).
+6. "Increased security/protection for poor/vulnerable populations" → Vulnerable Groups (explicit).
+7. "Protected/improved biodiversity and ecosystem services" → Ecological & Natural Systems.
+8. "Job creation" → Economic & Built Sectors.
+9. "Improved education and public awareness" → Urban Communities.
+10. "Increased transparency and accountability" → Governance & Institutions.
+11. Do not explain your reasoning. Output labels only.
+
+INPUTS:
+{paste0(sprintf("%d) %s", seq_along(txts), txts), collapse = "\\n")}')
+}
+
+# Classify unique co-benefit strings for beneficiary groups
+# (reuse the same unique strings from Step 2)
+cat("Classifying", length(unique_cobens), "unique co-benefit strings for beneficiary groups...\n")
+
+benef_classifications <- run_gpt_batch(
+  unique_cobens,
+  make_beneficiary_batch_prompt,
+  model      = MODEL,
+  chunk_size = CHUNK_SIZE
+)
+
+benef_map <- tibble(
+  CoBenefits_raw       = unique_cobens,
+  BeneficiaryGroup_GPT = benef_classifications
+)
+
+# Join back
+cdp <- cdp %>% left_join(benef_map, by = "CoBenefits_raw")
+
+# Summary
+beneficiary_summary <- cdp %>%
+  filter(!is.na(BeneficiaryGroup_GPT), BeneficiaryGroup_GPT != "Not applicable") %>%
+  separate_rows(BeneficiaryGroup_GPT, sep = ";\\s*") %>%
+  mutate(BeneficiaryGroup_GPT = str_squish(BeneficiaryGroup_GPT)) %>%
+  filter(BeneficiaryGroup_GPT != "", BeneficiaryGroup_GPT != "Not applicable") %>%
+  count(BeneficiaryGroup_GPT, sort = TRUE) %>%
+  rename(`Beneficiary Group` = BeneficiaryGroup_GPT, Occurrences = n)
+
+cat("\nBeneficiary group summary:\n")
+print(as.data.frame(beneficiary_summary))
+write_csv(beneficiary_summary, "cdp_beneficiary_counts.csv")
+write_csv(benef_map, "cdp_beneficiary_mapping_review.csv")
+```
+
+```{r step4-action-types}
+# ==============================================================================
+# STEP 4: ACTION TYPE CLASSIFICATION (GPT)
+# ==============================================================================
+# Classify each Action Group into one of the 4 intervention types:
+#   Structural/Physical, Social, Institutional, Ecosystem-based
+
+cat("\n===== STEP 4: Action Type Classification (GPT) =====\n")
+
+ACTION_TYPE_LABELS <- c(
+  "Structural/Physical",
+  "Social",
+  "Institutional",
+  "Ecosystem-based",
+  "Not applicable"
+)
+
+make_action_type_batch_prompt <- function(txts) {
+  glue::glue(
+'You will read short labels describing types of climate adaptation actions reported by cities.
+Your task is to classify each label into ONE of the intervention type categories below.
+
+Return exactly ONE line per input, in the same order.
+If more than one category clearly applies, separate them with "; ". Favor a single category.
+If the text does not describe a meaningful action type (e.g. "No adaptation action in place"), return exactly: Not applicable
+Please return exactly the names of the categories below and nothing else.
+
+Use only these exact labels:
+
+- Structural/Physical
+Definition: Enabling, implementing, or undertaking technological innovation or infrastructural development. Includes engineered and built environment interventions, technological solutions, hard infrastructure, construction, physical barriers, drainage systems, energy infrastructure, transport infrastructure, water supply systems, building retrofits, sea walls, levees, green roofs (when engineered).
+Examples of matching CDP Action Groups: "Engineered and built environment actions", "Technological actions"
+
+- Social
+Definition: Refers to "soft" adaptation measures, which involve changes in societal values or practices. It is often linked to issues of education, information, and behavioural changes to support communities within specific adaptation processes to climate change and climate hazards. Includes awareness campaigns, training programs, community engagement, health services, behavioural nudges, educational initiatives, social protection.
+Examples of matching CDP Action Groups: "Educational/Informational actions", "Behavioural actions", "Services actions"
+
+- Institutional
+Definition: Enhancing multilevel governance or institutional capabilities. Can be both formally established, for instance through laws and regulations, and informally established, for instance by traditions or customs. They include rules, norms, and conventions that guide, constrain, or enable behaviors and practices, including the organizations through which they operate. Includes government policies, laws, regulations, planning frameworks, economic/financial instruments, codes, standards.
+Examples of matching CDP Action Groups: "Government policies and programs actions", "Laws and regulations actions", "Economic actions"
+
+- Ecosystem-based
+Definition: Enhancing, protecting, or promoting ecosystem services. Includes nature-based solutions, green infrastructure for ecological function, reforestation, wetland restoration, mangrove rehabilitation, biodiversity conservation, agroforestry, urban greening (when primarily for ecological benefit).
+Examples of matching CDP Action Groups: "Ecosystem-based actions"
+
+- Not applicable
+Definition: The text does not describe a meaningful adaptation action type. Includes "No adaptation action in place", "Other, please specify" without further detail.
+
+Decision rules:
+1. Classify based on the TYPE of intervention described, not its outcome.
+2. "Engineered and built environment actions" → Structural/Physical
+3. "Technological actions" → Structural/Physical
+4. "Educational/Informational actions" → Social
+5. "Behavioural actions" → Social
+6. "Services actions" → Social
+7. "Government policies and programs actions" → Institutional
+8. "Laws and regulations actions" → Institutional
+9. "Economic actions" → Institutional
+10. "Ecosystem-based actions" → Ecosystem-based
+11. "Other, please specify" → Not applicable
+12. "No adaptation action in place" → Not applicable
+13. Do not explain your reasoning. Output labels only, nothing else.
+
+INPUTS:
+{paste0(sprintf("%d) %s", seq_along(txts), txts), collapse = "\\n")}')
+}
+
+# Classify unique action group strings
+unique_actions <- cdp %>%
+  filter(!is.na(ActionGroup), ActionGroup != "") %>%
+  distinct(ActionGroup) %>%
+  pull(ActionGroup)
+
+cat("Classifying", length(unique_actions), "unique action group strings...\n")
+
+action_classifications <- run_gpt_batch(
+  unique_actions,
+  make_action_type_batch_prompt,
+  model = MODEL,
+  chunk_size = CHUNK_SIZE
+)
+
+action_map <- tibble(
+  ActionGroup      = unique_actions,
+  InterventionType = action_classifications
+)
+
+# Join back
+cdp <- cdp %>% left_join(action_map, by = "ActionGroup")
+
+# Summary
+action_summary <- cdp %>%
+  filter(!is.na(InterventionType), InterventionType != "Not applicable") %>%
+  separate_rows(InterventionType, sep = ";\\s*") %>%
+  mutate(InterventionType = str_squish(InterventionType)) %>%
+  filter(InterventionType != "", InterventionType != "Not applicable") %>%
+  count(InterventionType, sort = TRUE) %>%
+  rename(`Intervention Type` = InterventionType, Occurrences = n)
+
+cat("\nAction type summary:\n")
+print(as.data.frame(action_summary))
+write_csv(action_summary, "cdp_action_type_counts.csv")
+write_csv(action_map, "cdp_action_type_mapping_review.csv")
+```
+
+```{r step5-summaries-exports}
+# ==============================================================================
+# STEP 5: SUMMARIES, SANKEY EDGES & EXPORTS
+# ==============================================================================
+
+cat("\n===== STEP 5: Summary & Exports =====\n")
+
+# --- 5a) Sankey edges: Benefit Type → Beneficiary Group ---
+sankey_benefit_benef <- cdp %>%
+  filter(!is.na(BenefitType), !is.na(BeneficiaryGroup_GPT),
+         BenefitType != "Not applicable", BeneficiaryGroup_GPT != "Not applicable") %>%
+  separate_rows(BenefitType, sep = ";\\s*") %>%
+  separate_rows(BeneficiaryGroup_GPT, sep = ";\\s*") %>%
+  mutate(
+    BenefitType = str_squish(BenefitType),
+    BeneficiaryGroup_GPT = str_squish(BeneficiaryGroup_GPT)
+  ) %>%
+  filter(BenefitType != "", BeneficiaryGroup_GPT != "") %>%
+  count(source = BenefitType, target = BeneficiaryGroup_GPT,
+        name = "value", sort = TRUE)
+
+write_csv(sankey_benefit_benef, "cdp_sankey_edges_benefit_to_beneficiary.csv")
+cat("\nSankey edges (Benefit Type → Beneficiary Group):\n")
+print(head(sankey_benefit_benef, 15))
+
+# --- 5b) Sankey edges: Intervention Type → Benefit Type ---
+sankey_action_benefit <- cdp %>%
+  filter(!is.na(InterventionType), !is.na(BenefitType),
+         InterventionType != "Not applicable", BenefitType != "Not applicable") %>%
+  separate_rows(InterventionType, sep = ";\\s*") %>%
+  separate_rows(BenefitType, sep = ";\\s*") %>%
+  mutate(
+    InterventionType = str_squish(InterventionType),
+    BenefitType = str_squish(BenefitType)
+  ) %>%
+  filter(InterventionType != "", BenefitType != "") %>%
+  count(source = InterventionType, target = BenefitType,
+        name = "value", sort = TRUE)
+
+write_csv(sankey_action_benefit, "cdp_sankey_edges_action_to_benefit.csv")
+cat("\nSankey edges (Intervention Type → Benefit Type):\n")
+print(head(sankey_action_benefit, 15))
+
+# --- 5c) Sankey edges: Hazard → Intervention Type ---
+sankey_hazard_action <- cdp %>%
+  filter(!is.na(HazardType_BTR), !is.na(InterventionType),
+         HazardType_BTR != "Not applicable", InterventionType != "Not applicable") %>%
+  separate_rows(HazardType_BTR, sep = ";\\s*") %>%
+  separate_rows(InterventionType, sep = ";\\s*") %>%
+  mutate(
+    HazardType_BTR = str_squish(HazardType_BTR),
+    InterventionType = str_squish(InterventionType)
+  ) %>%
+  filter(HazardType_BTR != "", InterventionType != "") %>%
+  count(source = HazardType_BTR, target = InterventionType,
+        name = "value", sort = TRUE)
+
+write_csv(sankey_hazard_action, "cdp_sankey_edges_hazard_to_action.csv")
+cat("\nSankey edges (Hazard → Intervention Type):\n")
+print(head(sankey_hazard_action, 15))
+
+# --- 5d) Hazard by City (top cities) ---
+hazard_by_city <- cdp %>%
+  filter(!is.na(HazardType_BTR), HazardType_BTR != "Not applicable") %>%
+  separate_rows(HazardType_BTR, sep = ";\\s*") %>%
+  mutate(HazardType_BTR = str_squish(HazardType_BTR)) %>%
+  filter(HazardType_BTR != "", HazardType_BTR != "Not applicable") %>%
+  count(City, HazardType_BTR, sort = TRUE) %>%
+  rename(`Hazard Category` = HazardType_BTR, Occurrences = n)
+
+write_csv(hazard_by_city, "cdp_hazard_by_city.csv")
+```
+
+```{r step6-plots}
+# ==============================================================================
+# STEP 6: PLOTS
+# ==============================================================================
+
+cat("\n===== STEP 6: Plots =====\n")
+
+# --- Hazard distribution ---
+p_hazards <- ggplot(
+  hazard_summary,
+  aes(x = reorder(`Hazard Category`, Occurrences), y = Occurrences, fill = Occurrences)
+) +
+  geom_col() + coord_flip() +
+  scale_fill_viridis_c(option = "plasma", direction = -1, guide = "none") +
+  labs(title = "CDP Hazard Categories (BTR Classification)", x = NULL, y = "Occurrences") +
+  theme_minimal(base_size = 12) +
+  theme(axis.text.y = element_text(size = 11))
+ggsave("cdp_hazard_plot.png", p_hazards, width = 10, height = 6, dpi = 300)
+
+# --- Benefit types ---
+p_benefits <- ggplot(
+  benefit_summary,
+  aes(x = reorder(`Benefit Type`, Occurrences), y = Occurrences, fill = `Benefit Type`)
+) +
+  geom_col(show.legend = FALSE) + coord_flip() +
+  scale_fill_viridis_d(option = "mako") +
+  labs(title = "CDP Co-Benefits (Harmonized Benefit Types)", x = NULL, y = "Occurrences") +
+  theme_minimal(base_size = 12)
+ggsave("cdp_benefit_plot.png", p_benefits, width = 10, height = 6, dpi = 300)
+
+# --- Beneficiary groups ---
+p_beneficiary <- ggplot(
+  beneficiary_summary,
+  aes(x = reorder(`Beneficiary Group`, Occurrences), y = Occurrences, fill = `Beneficiary Group`)
+) +
+  geom_col(show.legend = FALSE) + coord_flip() +
+  scale_fill_viridis_d(option = "cividis") +
+  labs(title = "CDP Beneficiary Groups (GPT Classification)", x = NULL, y = "Occurrences") +
+  theme_minimal(base_size = 12)
+ggsave("cdp_beneficiary_plot.png", p_beneficiary, width = 10, height = 6, dpi = 300)
+
+# --- Intervention types ---
+p_action <- ggplot(
+  action_summary,
+  aes(x = reorder(`Intervention Type`, Occurrences), y = Occurrences, fill = `Intervention Type`)
+) +
+  geom_col(show.legend = FALSE) + coord_flip() +
+  scale_fill_viridis_d(option = "turbo") +
+  labs(title = "CDP Action Types (Intervention Classification)", x = NULL, y = "Occurrences") +
+  theme_minimal(base_size = 12)
+ggsave("cdp_action_type_plot.png", p_action, width = 10, height = 6, dpi = 300)
+
+# --- Hazard × Intervention Type heatmap ---
+hazard_action_cross <- cdp %>%
+  filter(!is.na(HazardType_BTR), !is.na(InterventionType),
+         HazardType_BTR != "Not applicable", InterventionType != "Not applicable") %>%
+  separate_rows(HazardType_BTR, sep = ";\\s*") %>%
+  separate_rows(InterventionType, sep = ";\\s*") %>%
+  mutate(
+    HazardType_BTR = str_squish(HazardType_BTR),
+    InterventionType = str_squish(InterventionType)
+  ) %>%
+  filter(HazardType_BTR != "", InterventionType != "") %>%
+  count(HazardType_BTR, InterventionType)
+
+p_heatmap <- ggplot(
+  hazard_action_cross,
+  aes(x = InterventionType, y = HazardType_BTR, fill = n)
+) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = n), size = 3) +
+  scale_fill_viridis_c(option = "plasma", direction = -1) +
+  labs(title = "Hazard × Intervention Type", x = "Intervention Type",
+       y = "Hazard Category", fill = "Count") +
+  theme_minimal(base_size = 10) +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+ggsave("cdp_hazard_action_heatmap.png", p_heatmap, width = 10, height = 8, dpi = 300)
+```
+
+```{r step7-export}
+# ==============================================================================
+# STEP 7: FINAL EXPORT
+# ==============================================================================
+
+cat("\n===== STEP 7: Final Export =====\n")
+
+write_excel_csv(cdp, "CDP_Data_Processed.csv")
+
+cat("Final processed dataset written to CDP_Data_Processed.csv\n")
+cat("Columns:", paste(names(cdp), collapse = ", "), "\n")
+cat("Rows:", nrow(cdp), "\n")
+
+# --- Coverage stats ---
+cat("\n--- Coverage Statistics ---\n")
+cat("Hazard classified:      ",
+    sum(!is.na(cdp$HazardType_BTR) & cdp$HazardType_BTR != "Not applicable"),
+    "of", nrow(cdp), "rows\n")
+cat("Benefit classified:     ",
+    sum(!is.na(cdp$BenefitType) & cdp$BenefitType != "Not applicable"),
+    "of", nrow(cdp), "rows\n")
+cat("Beneficiary classified: ",
+    sum(!is.na(cdp$BeneficiaryGroup_GPT) & cdp$BeneficiaryGroup_GPT != "Not applicable"),
+    "of", nrow(cdp), "rows\n")
+cat("Action type classified: ",
+    sum(!is.na(cdp$InterventionType) & cdp$InterventionType != "Not applicable"),
+    "of", nrow(cdp), "rows\n")
+
+cat("\n===== PROCESSING COMPLETE =====\n")
+cat("Output files:\n")
+cat("  - CDP_Data_Processed.csv                          (full processed dataset)\n")
+cat("  - cdp_hazard_counts.csv                           (hazard frequency table)\n")
+cat("  - cdp_hazard_mapping_review.csv                   (GPT hazard mapping for review)\n")
+cat("  - cdp_benefit_counts.csv                          (co-benefit frequency table)\n")
+cat("  - cdp_cobenefit_mapping_review.csv                (GPT co-benefit mapping for review)\n")
+cat("  - cdp_beneficiary_counts.csv                      (beneficiary group frequency table)\n")
+cat("  - cdp_beneficiary_mapping_review.csv              (GPT beneficiary mapping for review)\n")
+cat("  - cdp_action_type_counts.csv                      (intervention type frequency table)\n")
+cat("  - cdp_action_type_mapping_review.csv              (GPT action type mapping for review)\n")
+cat("  - cdp_sankey_edges_benefit_to_beneficiary.csv     (Sankey edge list)\n")
+cat("  - cdp_sankey_edges_action_to_benefit.csv          (Sankey edge list)\n")
+cat("  - cdp_sankey_edges_hazard_to_action.csv           (Sankey edge list)\n")
+cat("  - cdp_hazard_by_city.csv                          (hazards by city)\n")
+cat("  - *.png                                           (plots)\n")
+```
